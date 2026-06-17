@@ -1,0 +1,6 @@
+{
+  "name": "FitDeficit",
+  "description": "A modern, bold fitness and nutrition tracker designed for logging meals, managing weight, planning workouts, and syncing progress with water tracking and community features.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

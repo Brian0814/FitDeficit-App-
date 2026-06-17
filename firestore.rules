@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function incomingDataBelongsToUser() {
+      return isAuthenticated() && (
+        request.resource == null || 
+        request.resource.data.userId == request.auth.uid
+      );
+    }
+
+    // Profiles Collection
+    match /profiles/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
+    }
+
+    // Food Logs Collection
+    match /foodLogs/{logId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow write: if isAuthenticated() && incomingDataBelongsToUser() && (resource == null || resource.data.userId == request.auth.uid);
+    }
+
+    // Weight Logs Collection
+    match /weightLogs/{logId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow write: if isAuthenticated() && incomingDataBelongsToUser() && (resource == null || resource.data.userId == request.auth.uid);
+    }
+
+    // Water Logs Collection
+    match /waterLogs/{logId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow write: if isAuthenticated() && incomingDataBelongsToUser() && (resource == null || resource.data.userId == request.auth.uid);
+    }
+  }
+}
