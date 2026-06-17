@@ -202,6 +202,16 @@ export default function FoodLog({ userId, profile, calorieTarget, proteinTarget 
   const fetchFoodLogs = async () => {
     setLoading(true);
     try {
+      if (userId === "guest_user") {
+        const allFoodLogsRaw = localStorage.getItem("fitdeficit_food_logs") || "[]";
+        const allFoodLogs: FoodLogItem[] = JSON.parse(allFoodLogsRaw);
+        const filtered = allFoodLogs.filter(f => f.userId === userId && f.date === dateStr);
+        filtered.sort((a, b) => a.timestamp - b.timestamp);
+        setFoodLogs(filtered);
+        setLoading(false);
+        return;
+      }
+
       const q = query(
         collection(db, "foodLogs"),
         where("userId", "==", userId),
@@ -246,7 +256,18 @@ export default function FoodLog({ userId, profile, calorieTarget, proteinTarget 
     };
 
     try {
-      await addDoc(collection(db, "foodLogs"), logEntry);
+      if (userId === "guest_user") {
+        const allFoodLogsRaw = localStorage.getItem("fitdeficit_food_logs") || "[]";
+        const allFoodLogs: FoodLogItem[] = JSON.parse(allFoodLogsRaw);
+        const newLog: FoodLogItem = {
+          id: "food_" + Date.now(),
+          ...logEntry
+        };
+        allFoodLogs.push(newLog);
+        localStorage.setItem("fitdeficit_food_logs", JSON.stringify(allFoodLogs));
+      } else {
+        await addDoc(collection(db, "foodLogs"), logEntry);
+      }
       
       // Reset targets
       setFoodName("");
@@ -368,8 +389,16 @@ export default function FoodLog({ userId, profile, calorieTarget, proteinTarget 
   // Log deletes
   const handleDeleteFood = async (id: string) => {
     try {
-      await deleteDoc(doc(db, "foodLogs", id));
-      setFoodLogs(foodLogs.filter((log) => log.id !== id));
+      if (userId === "guest_user") {
+        const allFoodLogsRaw = localStorage.getItem("fitdeficit_food_logs") || "[]";
+        const allFoodLogs: FoodLogItem[] = JSON.parse(allFoodLogsRaw);
+        const filtered = allFoodLogs.filter((log: any) => log.id !== id);
+        localStorage.setItem("fitdeficit_food_logs", JSON.stringify(filtered));
+        setFoodLogs(foodLogs.filter((log) => log.id !== id));
+      } else {
+        await deleteDoc(doc(db, "foodLogs", id));
+        setFoodLogs(foodLogs.filter((log) => log.id !== id));
+      }
     } catch (err) {
       console.error("Failed to delete food record:", err);
     }

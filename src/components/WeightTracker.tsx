@@ -27,6 +27,16 @@ export default function WeightTracker({ userId, profile, onProfileUpdate }: Weig
   const fetchWeightLogs = async () => {
     setLoading(true);
     try {
+      if (userId === "guest_user") {
+        const allWeightLogsRaw = localStorage.getItem("fitdeficit_weight_logs") || "[]";
+        const allWeightLogs: WeightLog[] = JSON.parse(allWeightLogsRaw);
+        const filtered = allWeightLogs.filter(w => w.userId === userId);
+        filtered.sort((a, b) => a.timestamp - b.timestamp);
+        setWeightLogs(filtered);
+        setLoading(false);
+        return;
+      }
+
       const q = query(
         collection(db, "weightLogs"),
         where("userId", "==", userId)
@@ -61,18 +71,41 @@ export default function WeightTracker({ userId, profile, onProfileUpdate }: Weig
         timestamp: new Date(logDate + "T12:00:00").getTime()
       };
 
-      await addDoc(collection(db, "weightLogs"), logEntry);
-      
-      // Update in local state list
-      const updatedLogs = [...weightLogs, logEntry].sort((a, b) => a.timestamp - b.timestamp);
-      setWeightLogs(updatedLogs);
-      setNewWeight("");
+      if (userId === "guest_user") {
+        const allWeightLogsRaw = localStorage.getItem("fitdeficit_weight_logs") || "[]";
+        const allWeightLogs = JSON.parse(allWeightLogsRaw);
+        const newLog = {
+          id: "weight_" + Date.now(),
+          ...logEntry
+        };
+        allWeightLogs.push(newLog);
+        localStorage.setItem("fitdeficit_weight_logs", JSON.stringify(allWeightLogs));
 
-      // Update the user's current weight in Firestore/Profile State
-      const profileRef = doc(db, "profiles", userId);
-      await updateDoc(profileRef, { currentWeight: weightNum });
-      onProfileUpdate({ ...profile, currentWeight: weightNum });
-      
+        // Update local state list
+        const updatedLogs = [...weightLogs, newLog].sort((a, b) => a.timestamp - b.timestamp);
+        setWeightLogs(updatedLogs);
+        
+        // Update local profile and localStorage
+        const updatedProfile = { ...profile, currentWeight: weightNum };
+        localStorage.setItem("fitdeficit_profile_guest_user", JSON.stringify(updatedProfile));
+        onProfileUpdate(updatedProfile);
+      } else {
+        const docRef = await addDoc(collection(db, "weightLogs"), logEntry);
+        const newLogWithId: WeightLog = {
+          id: docRef.id,
+          ...logEntry
+        };
+        
+        // Update in local state list
+        const updatedLogs = [...weightLogs, newLogWithId].sort((a, b) => a.timestamp - b.timestamp);
+        setWeightLogs(updatedLogs);
+
+        // Update the user's current weight in Firestore/Profile State
+        const profileRef = doc(db, "profiles", userId);
+        await updateDoc(profileRef, { currentWeight: weightNum });
+        onProfileUpdate({ ...profile, currentWeight: weightNum });
+      }
+      setNewWeight("");
     } catch (err) {
       console.error("Failed to log weight:", err);
     } finally {
@@ -82,16 +115,33 @@ export default function WeightTracker({ userId, profile, onProfileUpdate }: Weig
 
   const handleDeleteLog = async (id: string, weightToDelete: number) => {
     try {
-      await deleteDoc(doc(db, "weightLogs", id));
-      const updatedLogs = weightLogs.filter((log) => log.id !== id);
-      setWeightLogs(updatedLogs);
+      if (userId === "guest_user") {
+        const allWeightLogsRaw = localStorage.getItem("fitdeficit_weight_logs") || "[]";
+        const allWeightLogs = JSON.parse(allWeightLogsRaw);
+        const filtered = allWeightLogs.filter((log: any) => log.id !== id);
+        localStorage.setItem("fitdeficit_weight_logs", JSON.stringify(filtered));
 
-      // Optionally roll back currentWeight if deleted log matches current profile weight
-      if (profile.currentWeight === weightToDelete && updatedLogs.length > 0) {
-        const lastLog = updatedLogs[updatedLogs.length - 1];
-        const profileRef = doc(db, "profiles", userId);
-        await updateDoc(profileRef, { currentWeight: lastLog.weight });
-        onProfileUpdate({ ...profile, currentWeight: lastLog.weight });
+        const updatedLogs = weightLogs.filter((log) => log.id !== id);
+        setWeightLogs(updatedLogs);
+
+        if (profile.currentWeight === weightToDelete && updatedLogs.length > 0) {
+          const lastLog = updatedLogs[updatedLogs.length - 1];
+          const updatedProfile = { ...profile, currentWeight: lastLog.weight };
+          localStorage.setItem("fitdeficit_profile_guest_user", JSON.stringify(updatedProfile));
+          onProfileUpdate(updatedProfile);
+        }
+      } else {
+        await deleteDoc(doc(db, "weightLogs", id));
+        const updatedLogs = weightLogs.filter((log) => log.id !== id);
+        setWeightLogs(updatedLogs);
+
+        // Optionally roll back currentWeight if deleted log matches current profile weight
+        if (profile.currentWeight === weightToDelete && updatedLogs.length > 0) {
+          const lastLog = updatedLogs[updatedLogs.length - 1];
+          const profileRef = doc(db, "profiles", userId);
+          await updateDoc(profileRef, { currentWeight: lastLog.weight });
+          onProfileUpdate({ ...profile, currentWeight: lastLog.weight });
+        }
       }
     } catch (err) {
       console.error("Failed to delete log:", err);
@@ -105,9 +155,15 @@ export default function WeightTracker({ userId, profile, onProfileUpdate }: Weig
 
     setUpdatingGoal(true);
     try {
-      const profileRef = doc(db, "profiles", userId);
-      await updateDoc(profileRef, { goalWeight: goalNum });
-      onProfileUpdate({ ...profile, goalWeight: goalNum });
+      if (userId === "guest_user") {
+        const updatedProfile = { ...profile, goalWeight: goalNum };
+        localStorage.setItem("fitdeficit_profile_guest_user", JSON.stringify(updatedProfile));
+        onProfileUpdate(updatedProfile);
+      } else {
+        const profileRef = doc(db, "profiles", userId);
+        await updateDoc(profileRef, { goalWeight: goalNum });
+        onProfileUpdate({ ...profile, goalWeight: goalNum });
+      }
     } catch (err) {
       console.error("Failed to update goal weight:", err);
     } finally {

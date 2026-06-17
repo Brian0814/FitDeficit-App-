@@ -28,6 +28,16 @@ export default function AdminPortal() {
   const fetchAdminUsers = async () => {
     setLoading(true);
     try {
+      if (localStorage.getItem("fitdeficit_guest_mode") === "true") {
+        setUsersList([
+          { uid: "guest_user", name: "Sandbox Guest (You)", age: 30, height: 175, currentWeight: 180, goalWeight: 165, fitnessGoal: "lose", activityLevel: "moderate", workoutExperience: "beginner", dietaryPreference: "None", isPrivate: true, workoutSessionsPerDay: 2, twoADaySplitPreference: "cardio-lifting", workoutStreak: 0, createdAt: new Date().toISOString() },
+          { uid: "p1", name: "RippedTitan", age: 28, height: 182, currentWeight: 195, goalWeight: 190, fitnessGoal: "tone", activityLevel: "active", workoutExperience: "advanced", dietaryPreference: "None", isPrivate: false, workoutSessionsPerDay: 2, twoADaySplitPreference: "cardio-lifting", workoutStreak: 7, createdAt: new Date().toISOString() },
+          { uid: "p2", name: "ValkyrieLift", age: 25, height: 168, currentWeight: 140, goalWeight: 135, fitnessGoal: "lose_tone", activityLevel: "moderate", workoutExperience: "intermediate", dietaryPreference: "None", isPrivate: false, workoutSessionsPerDay: 1, twoADaySplitPreference: "cardio-lifting", workoutStreak: 4, createdAt: new Date().toISOString() }
+        ]);
+        setLoading(false);
+        return;
+      }
+
       // Admin bypass: load all registered user profiles
       const querySnapshot = await getDocs(collection(db, "profiles"));
       const data: UserProfile[] = [];

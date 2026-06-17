@@ -20,6 +20,7 @@ export default function AIChatBot() {
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -109,9 +110,13 @@ export default function AIChatBot() {
   };
 
   const handleClearHistory = () => {
-    const confirmation = window.confirm("Are you sure you want to completely wipe your session conversation logs?");
-    if (!confirmation) return;
-    
+    if (!showClearConfirm) {
+      setShowClearConfirm(true);
+      // Reset confirmation if they don't click again in 4 seconds
+      setTimeout(() => setShowClearConfirm(false), 4000);
+      return;
+    }
+
     const originalGreeting: Message[] = [
       {
         id: "welcome",
@@ -123,6 +128,7 @@ export default function AIChatBot() {
     setMessages(originalGreeting);
     saveHistory(originalGreeting);
     setErrorText(null);
+    setShowClearConfirm(false);
   };
 
   return (
@@ -141,11 +147,15 @@ export default function AIChatBot() {
 
         <button
           onClick={handleClearHistory}
-          className="text-[10px] font-mono hover:text-red-400 transition bg-neutral-950 border border-neutral-900 rounded px-2.5 py-1.5 text-neutral-500 flex items-center gap-1.5 select-none cursor-pointer"
-          title="Reset conversation logs"
+          className={`text-[10px] font-mono transition border rounded px-2.5 py-1.5 flex items-center gap-1.5 select-none cursor-pointer ${
+            showClearConfirm 
+              ? "border-red-500/50 bg-red-950/20 text-red-400 animate-pulse" 
+              : "border-neutral-900 bg-neutral-950 text-neutral-500 hover:text-red-400"
+          }`}
+          title={showClearConfirm ? "Confirm deletion sequence" : "Reset conversation logs"}
         >
           <Trash2 className="h-3.5 w-3.5" />
-          CLEAR HISTORY
+          {showClearConfirm ? "CLICK AGAIN TO CONFIRM" : "CLEAR HISTORY"}
         </button>
       </div>
 

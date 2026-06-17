@@ -27,8 +27,13 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<string>("dashboard");
+  const [activeTab, setActiveTab ] = useState<string>("dashboard");
   const [isOnboarding, setIsOnboarding] = useState(false);
+
+  // States for custom Profile Deletion Confirm Modal
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [deletingDatabase, setDeletingDatabase] = useState(false);
+  const [deleteStatusMessage, setDeleteStatusMessage] = useState<string | null>(null);
 
   // Local sync utilities for dashboard
   const [caloriesEatenToday, setCaloriesEatenToday] = useState(0);
@@ -47,15 +52,32 @@ export default function App() {
 
   // Subscribe to Authentication state checks
   useEffect(() => {
+    const isGuestBypass = localStorage.getItem("fitdeficit_guest_mode") === "true";
+    if (isGuestBypass) {
+      const guestUser = {
+        uid: "guest_user",
+        email: "guest@fitdeficit.local",
+        displayName: "Sandbox Guest",
+        isGuest: true
+      };
+      setCurrentUser(guestUser);
+      loadUserProfile("guest_user");
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
       setLoading(true);
       if (authUser) {
         setCurrentUser(authUser);
         await loadUserProfile(authUser.uid);
       } else {
-        setCurrentUser(null);
-        setProfile(null);
-        setIsOnboarding(false);
+        const activeGuest = localStorage.getItem("fitdeficit_guest_mode") === "true";
+        if (!activeGuest) {
+          setCurrentUser(null);
+          setProfile(null);
+          setIsOnboarding(false);
+        }
       }
       setLoading(false);
     });
@@ -72,6 +94,17 @@ export default function App() {
 
   const loadUserProfile = async (uid: string) => {
     try {
+      if (uid === "guest_user") {
+        const savedProfile = localStorage.getItem("fitdeficit_profile_guest_user");
+        if (savedProfile) {
+          setProfile(JSON.parse(savedProfile));
+          setIsOnboarding(false);
+        } else {
+          setIsOnboarding(true);
+        }
+        return;
+      }
+
       const docRef = doc(db, "profiles", uid);
       const docSnap = await getDoc(docRef);
 
@@ -90,6 +123,39 @@ export default function App() {
   const syncDashboardTotals = async () => {
     if (!currentUser) return;
     try {
+      if (currentUser.isGuest) {
+        // Load Food Logs from localStorage
+        const allFoodLogsRaw = localStorage.getItem("fitdeficit_food_logs") || "[]";
+        const allFoodLogs: FoodLogItem[] = JSON.parse(allFoodLogsRaw);
+        const physicalFoodLogs = allFoodLogs.filter(f => f.userId === currentUser.uid && f.date === todayDateStr);
+        let cals = 0;
+        let prot = 0;
+        physicalFoodLogs.forEach(item => {
+          cals += item.calories || 0;
+          prot += item.protein || 0;
+        });
+        setCaloriesEatenToday(cals);
+        setProteinEatenToday(prot);
+
+        // Load Water Logs from localStorage
+        const waterLogsRaw = localStorage.getItem("fitdeficit_water_logs") || "[]";
+        const allWaterLogs = JSON.parse(waterLogsRaw);
+        const todayWater = allWaterLogs.find((w: any) => w.userId === currentUser.uid && w.date === todayDateStr);
+        setWaterCupsToday(todayWater ? todayWater.cups : 0);
+
+        // Load Streak/Completed status from profile
+        const savedProfile = localStorage.getItem("fitdeficit_profile_guest_user");
+        if (savedProfile) {
+          const pData = JSON.parse(savedProfile) as UserProfile;
+          if (pData.lastActiveDate === todayDateStr) {
+            setWorkoutCompletedToday(true);
+          } else {
+            setWorkoutCompletedToday(false);
+          }
+        }
+        return;
+      }
+
       // 1. Fetch calorie and protein totals for today
       const foodQuery = query(
         collection(db, "foodLogs"),
@@ -145,6 +211,25 @@ export default function App() {
       const newCups = waterCupsToday + 1;
       setWaterCupsToday(newCups);
 
+      if (currentUser.isGuest) {
+        const waterLogsRaw = localStorage.getItem("fitdeficit_water_logs") || "[]";
+        const allWaterLogs = JSON.parse(waterLogsRaw);
+        const index = allWaterLogs.findIndex((w: any) => w.userId === currentUser.uid && w.date === todayDateStr);
+        if (index > -1) {
+          allWaterLogs[index].cups = newCups;
+        } else {
+          allWaterLogs.push({
+            id: "water_" + Date.now(),
+            userId: currentUser.uid,
+            cups: newCups,
+            date: todayDateStr,
+            timestamp: Date.now()
+          });
+        }
+        localStorage.setItem("fitdeficit_water_logs", JSON.stringify(allWaterLogs));
+        return;
+      }
+
       const waterQuery = query(
         collection(db, "waterLogs"),
         where("userId", "==", currentUser.uid),
@@ -177,6 +262,17 @@ export default function App() {
       const newCups = waterCupsToday - 1;
       setWaterCupsToday(newCups);
 
+      if (currentUser.isGuest) {
+        const waterLogsRaw = localStorage.getItem("fitdeficit_water_logs") || "[]";
+        const allWaterLogs = JSON.parse(waterLogsRaw);
+        const index = allWaterLogs.findIndex((w: any) => w.userId === currentUser.uid && w.date === todayDateStr);
+        if (index > -1) {
+          allWaterLogs[index].cups = newCups;
+          localStorage.setItem("fitdeficit_water_logs", JSON.stringify(allWaterLogs));
+        }
+        return;
+      }
+
       const waterQuery = query(
         collection(db, "waterLogs"),
         where("userId", "==", currentUser.uid),
@@ -207,6 +303,13 @@ export default function App() {
         lastActiveDate: todayDateStr
       };
 
+      if (currentUser.isGuest) {
+        localStorage.setItem("fitdeficit_profile_guest_user", JSON.stringify(updatedProfile));
+        setProfile(updatedProfile);
+        setWorkoutCompletedToday(true);
+        return;
+      }
+
       // Updates Firestore profile doc
       const profileRef = doc(db, "profiles", currentUser.uid);
       await updateDoc(profileRef, {
@@ -223,54 +326,123 @@ export default function App() {
     }
   };
 
-  // Profile deletion sequence
-  const handleDeleteUserProfile = async () => {
+  // Profile deletion state trigger
+  const handleDeleteUserProfile = () => {
     if (!currentUser || !profile) return;
-    const confirmation = window.confirm(
-      "☢️ WARNING: This action is permanent! Are you sure you want to completely erase your physical profile, logged weights, nutrition logs, water totals, and credentials? This cannot be undone."
-    );
-    if (!confirmation) return;
+    setShowDeleteConfirmModal(true);
+  };
+
+  // Profile deletion implementation sequence
+  const executeProfileDeletion = async () => {
+    if (!currentUser || !profile) return;
+    setDeletingDatabase(true);
+    setDeleteStatusMessage("Starting account records erasure...");
 
     try {
       const uid = currentUser.uid;
 
+      if (currentUser.isGuest) {
+        setDeleteStatusMessage("Pruning guest memory nodes...");
+        localStorage.removeItem("fitdeficit_profile_guest_user");
+        localStorage.removeItem("fitdeficit_guest_mode");
+        
+        try {
+          const allFoodRaw = localStorage.getItem("fitdeficit_food_logs") || "[]";
+          const allFood = JSON.parse(allFoodRaw);
+          localStorage.setItem("fitdeficit_food_logs", JSON.stringify(allFood.filter((f: any) => f.userId !== uid)));
+        } catch (e) {}
+        
+        try {
+          const allWeightsRaw = localStorage.getItem("fitdeficit_weight_logs") || "[]";
+          const allWeights = JSON.parse(allWeightsRaw);
+          localStorage.setItem("fitdeficit_weight_logs", JSON.stringify(allWeights.filter((w: any) => w.userId !== uid)));
+        } catch (e) {}
+
+        try {
+          const allWaterRaw = localStorage.getItem("fitdeficit_water_logs") || "[]";
+          const allWater = JSON.parse(allWaterRaw);
+          localStorage.setItem("fitdeficit_water_logs", JSON.stringify(allWater.filter((w: any) => w.userId !== uid)));
+        } catch (e) {}
+
+        setDeleteStatusMessage("Clear completed! Goodbye!");
+        setTimeout(() => {
+          setCurrentUser(null);
+          setProfile(null);
+          setIsOnboarding(false);
+          setShowDeleteConfirmModal(false);
+          setDeletingDatabase(false);
+          setDeleteStatusMessage(null);
+        }, 1500);
+        return;
+      }
+
+      setDeleteStatusMessage("Erasing physical profile record fields from Firestore...");
       // 1. Delete Firestore profile
       await deleteDoc(doc(db, "profiles", uid));
 
+      setDeleteStatusMessage("Eviscerating user meals and food logging tables...");
       // 2. Delete Food Logs
       const foodQuery = query(collection(db, "foodLogs"), where("userId", "==", uid));
       const foodSnapshot = await getDocs(foodQuery);
-      foodSnapshot.forEach(async (docSnap) => {
-        await deleteDoc(doc(db, "foodLogs", docSnap.id));
-      });
+      const foodDeletes = foodSnapshot.docs.map((docSnap) => deleteDoc(doc(db, "foodLogs", docSnap.id)));
+      await Promise.all(foodDeletes);
 
+      setDeleteStatusMessage("Purging physical body weight metrics records...");
       // 3. Delete Weight Logs
       const weightQuery = query(collection(db, "weightLogs"), where("userId", "==", uid));
       const weightSnapshot = await getDocs(weightQuery);
-      weightSnapshot.forEach(async (docSnap) => {
-        await deleteDoc(doc(db, "weightLogs", docSnap.id));
-      });
+      const weightDeletes = weightSnapshot.docs.map((docSnap) => deleteDoc(doc(db, "weightLogs", docSnap.id)));
+      await Promise.all(weightDeletes);
 
+      setDeleteStatusMessage("Wiping systemic hydration logs databases...");
       // 4. Delete Water Logs
       const waterQuery = query(collection(db, "waterLogs"), where("userId", "==", uid));
       const waterSnapshot = await getDocs(waterQuery);
-      waterSnapshot.forEach(async (docSnap) => {
-        await deleteDoc(doc(db, "waterLogs", docSnap.id));
-      });
+      const waterDeletes = waterSnapshot.docs.map((docSnap) => deleteDoc(doc(db, "waterLogs", docSnap.id)));
+      await Promise.all(waterDeletes);
 
-      // 5. Sign Out
+      setDeleteStatusMessage("De-authenticating credentials session instance...");
+      // 5. Sign Out & Clear State to Route to Login Screen
       await signOut(auth);
-      alert("Your profile and historical logs have been permanently erased.");
+      setDeleteStatusMessage("Permanent erasure completed successfully! Re-routing...");
+      
+      setTimeout(() => {
+        setCurrentUser(null);
+        setProfile(null);
+        setIsOnboarding(false);
+        setShowDeleteConfirmModal(false);
+        setDeletingDatabase(false);
+        setDeleteStatusMessage(null);
+      }, 1500);
+
     } catch (err: any) {
       console.error("Profile deletion sequence failed:", err);
-      alert("Failed to delete all databases. You have been logged out manually.");
-      await signOut(auth);
+      setDeleteStatusMessage(`Failure: ${err.message || err}. Logging out manually...`);
+      
+      try {
+        await signOut(auth);
+      } catch (signOutErr) {
+        console.error("Manual sign out failed:", signOutErr);
+      }
+      
+      setTimeout(() => {
+        setCurrentUser(null);
+        setProfile(null);
+        setIsOnboarding(false);
+        setShowDeleteConfirmModal(false);
+        setDeletingDatabase(false);
+        setDeleteStatusMessage(null);
+      }, 3000);
     }
   };
 
   const handleLogout = async () => {
     try {
+      localStorage.removeItem("fitdeficit_guest_mode");
       await signOut(auth);
+      setCurrentUser(null);
+      setProfile(null);
+      setIsOnboarding(false);
     } catch (err) {
       console.error("Failed to sign out:", err);
     }
@@ -288,7 +460,24 @@ export default function App() {
 
   // Not logged in -> Show login screen
   if (!currentUser) {
-    return <AuthScreen onSuccess={() => setIsOnboarding(false)} />;
+    return (
+      <AuthScreen 
+        onSuccess={() => {
+          const isGuestBypass = localStorage.getItem("fitdeficit_guest_mode") === "true";
+          if (isGuestBypass) {
+            const guestUser = {
+              uid: "guest_user",
+              email: "guest@fitdeficit.local",
+              displayName: "Sandbox Guest",
+              isGuest: true
+            };
+            setCurrentUser(guestUser);
+            loadUserProfile("guest_user");
+          }
+          setIsOnboarding(false);
+        }} 
+      />
+    );
   }
 
   // Profile Onboarding Form
@@ -804,6 +993,65 @@ export default function App() {
           SYSTEM BUILT & DESIGNED // CREATED BY BOJ
         </div>
       </footer>
+
+      {/* Custom Portal Confirmation Modal for Profile Deletion */}
+      {showDeleteConfirmModal && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-950 border-2 border-red-900/50 max-w-md w-full p-6 rounded-md shadow-2xl relative overflow-hidden flex flex-col gap-4">
+            
+            {/* Top red bar */}
+            <div className="absolute top-0 left-0 right-0 h-1 bg-red-650 animate-pulse"></div>
+
+            <div className="flex items-center gap-3 text-red-500 mb-1">
+              <AlertCircle className="h-6 w-6 animate-bounce" />
+              <h3 className="text-sm font-black font-mono tracking-widest uppercase">
+                DESTRUCTIVE ACTION CONFIRMATION
+              </h3>
+            </div>
+
+            <p className="text-xs text-zinc-300 font-mono tracking-wide uppercase leading-relaxed">
+              ☢️ <strong className="text-red-400">WARNING: Permanent erasure sequence.</strong>
+            </p>
+            
+            <p className="text-xs text-zinc-400 font-sans leading-relaxed">
+              This action is absolute and key-protected. This will completely and irrevocably purge your physical body metrics, daily workout streaks, logged weights, nutrition databases, hydration totals, and credentials. All data held on the Cloud database system will be terminated.
+            </p>
+
+            {deleteStatusMessage && (
+              <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-sm">
+                <p className="text-[10px] font-mono uppercase tracking-wider text-yellow-400 font-bold flex items-center gap-2">
+                  <span className="h-2 w-2 bg-yellow-400 rounded-full animate-ping inline-block shrink-0"></span>
+                  {deleteStatusMessage}
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-end mt-2">
+              <button
+                disabled={deletingDatabase}
+                onClick={() => setShowDeleteConfirmModal(false)}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-white text-xs font-bold uppercase tracking-wider font-mono rounded-sm transition cursor-pointer"
+              >
+                ABORT
+              </button>
+              <button
+                disabled={deletingDatabase}
+                onClick={executeProfileDeletion}
+                className="px-4 py-2 bg-red-850 hover:bg-red-750 disabled:bg-red-950 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider font-mono rounded-sm transition flex items-center gap-1.5 cursor-pointer"
+              >
+                {deletingDatabase ? (
+                  <>
+                    <span className="h-3 w-3 border-2 border-white/35 border-t-white rounded-full animate-spin inline-block"></span>
+                    ERASING...
+                  </>
+                ) : (
+                  "CONFIRM & PURGE"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

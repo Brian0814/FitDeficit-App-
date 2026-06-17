@@ -201,9 +201,14 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
     };
 
     try {
-      // Save directly to the firestore under /profiles/{userId}
-      await setDoc(doc(db, "profiles", userId), profileData);
-      onSave(profileData);
+      // Save directly to the firestore under /profiles/{userId} (with localStorage Guest bypass fallback)
+      if (userId === "guest_user") {
+        localStorage.setItem("fitdeficit_profile_guest_user", JSON.stringify(profileData));
+        onSave(profileData);
+      } else {
+        await setDoc(doc(db, "profiles", userId), profileData);
+        onSave(profileData);
+      }
     } catch (err: any) {
       console.error("Error setting custom user profile:", err);
       setErrorCode("Could not save your physical profile contents to Firestore: " + err.message);
