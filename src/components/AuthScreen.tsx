@@ -1,8 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   signOut,
   GoogleAuthProvider,
-  signInWithPopup
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult
 } from "firebase/auth";
 import { auth } from "../lib/firebase";
 import { Dumbbell, ShieldAlert, CircleHelp, Info, ShieldCheck, ArrowRight } from "lucide-react";
@@ -14,24 +16,68 @@ interface AuthProps {
 export default function AuthScreen({ onSuccess }: AuthProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isUnauthorizedDomain, setIsUnauthorizedDomain] = useState(false);
+  const [isPopupBlocked, setIsPopupBlocked] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
+
+  // Check for any redirect result when the component mounts
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          onSuccess();
+        }
+      })
+      .catch((err: any) => {
+        console.error("Google Auth Redirect Result error:", err);
+        handleAuthError(err);
+      });
+  }, []);
+
+  const handleAuthError = (err: any) => {
+    const code = err?.code || "";
+    const message = err?.message || "";
+    console.error("Processing auth error code:", code, "message:", message);
+
+    if (code === "auth/unauthorized-domain" || message.toLowerCase().includes("unauthorized-domain")) {
+      setIsUnauthorizedDomain(true);
+      setError("Firebase Authorized Domains Restriction");
+    } else if (code === "auth/popup-blocked" || message.toLowerCase().includes("popup-blocked") || message.toLowerCase().includes("popup_blocked_by_browser")) {
+      setIsPopupBlocked(true);
+      setError("Pop-up Window Blocked");
+    } else if (code === "auth/popup-closed-by-user" || message.toLowerCase().includes("closed-by-user")) {
+      setError("Sign-In Cancelled. Please click below to try again.");
+    } else {
+      setError(err.message || "Failed to sign in with Google.");
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError(null);
+    setIsUnauthorizedDomain(false);
+    setIsPopupBlocked(false);
     try {
       const provider = new GoogleAuthProvider();
       // Configure to recommend selecting an account if multiple exist
       provider.setCustomParameters({
         prompt: "select_account"
       });
-      await signInWithPopup(auth, provider);
-      onSuccess();
-    } catch (err: any) {
-      console.error("Google Auth error:", err);
-      if (err.code !== "auth/popup-closed-by-user") {
-        setError(err.message || "Failed to sign in with Google.");
+
+      // Detect mobile or touch environment to use Redirect instead of Popup
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+      
+      if (isMobile) {
+        console.log("Mobile/Touch environment detected. Using signInWithRedirect...");
+        await signInWithRedirect(auth, provider);
+      } else {
+        console.log("Desktop environment detected. Using signInWithPopup...");
+        await signInWithPopup(auth, provider);
+        onSuccess();
       }
+    } catch (err: any) {
+      console.error("Google Auth initial step error:", err);
+      handleAuthError(err);
     } finally {
       setLoading(false);
     }
@@ -117,9 +163,48 @@ export default function AuthScreen({ onSuccess }: AuthProps) {
             </div>
 
             {error && (
-              <div className="bg-red-950/40 border border-red-800 rounded-sm p-3 mb-5 flex items-start gap-2.5 text-xs text-red-200">
-                <ShieldAlert className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
-                <span>{error}</span>
+              <div className="bg-red-950/40 border border-red-800 rounded-sm p-4 mb-5 space-y-3 text-xs text-red-200">
+                <div className="flex items-start gap-2.5">
+                  <ShieldAlert className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+                  <span className="font-bold uppercase tracking-wider">{error}</span>
+                </div>
+                {isUnauthorizedDomain && (
+                  <div className="pt-2.5 border-t border-red-900/40 space-y-2 text-neutral-300 font-sans">
+                    <p className="font-bold text-yellow-400 uppercase text-[10px] tracking-wider">
+                      🛠️ HOW TO AUTHORIZE YOUR VERCEL LINK:
+                    </p>
+                    <p className="leading-relaxed">
+                      Firebase only accepts identity tokens from registered domains. Add your custom deployment URL so Google accepts it:
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1.5 bg-black/40 p-2.5 rounded border border-neutral-900 leading-normal text-[11px] font-mono">
+                      <li>
+                        Go to your{" "}
+                        <a 
+                          href="https://console.firebase.google.com/project/winged-tribute-ttxfk/authentication/settings" 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="text-yellow-400 underline hover:text-yellow-300 font-bold inline"
+                        >
+                          Firebase Console Link
+                        </a>
+                      </li>
+                      <li>Go to **Authorized domains** under Settings</li>
+                      <li>Click **Add domain**</li>
+                      <li>
+                        Input your Vercel address (e.g. <span className="text-yellow-300">your-app.vercel.app</span>)
+                      </li>
+                    </ol>
+                    <p className="text-[10px] text-neutral-400 italic">
+                      Once added, refresh your mobile browser page and click the sign-in button again!
+                    </p>
+                  </div>
+                )}
+                {isPopupBlocked && (
+                  <div className="pt-2 border-t border-red-900/40 text-neutral-300 text-[11px] leading-relaxed">
+                    <p className="font-semibold text-white">Using Safe Redirect fallback...</p>
+                    <p>We have adjusted your environment to utilize Secure Redirects instead of Pop-up layouts. Please click the button again to continue.</p>
+                  </div>
+                )}
               </div>
             )}
 
