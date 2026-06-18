@@ -353,13 +353,30 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
         setPendingSavedProfile(profileData);
         setShowSuccessModal(true);
       } else {
-        await setDoc(doc(db, "profiles", userId), profileData);
+        // Build a connection check timeout to handle uninitialized database or offline cloud locks instantly
+        const docRef = doc(db, "profiles", userId);
+        const savePromise = setDoc(docRef, profileData);
+        
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error("FIRESTORE_WRITE_TIMEOUT")), 6000);
+        });
+
+        // Race the actual Firestore save against the 6-second watchdog timeout
+        await Promise.race([savePromise, timeoutPromise]);
+
+        // Backup successfully saved to localStorage as well for offline fallback support
+        localStorage.setItem("fitdeficit_offline_profile_" + userId, JSON.stringify(profileData));
+
         setPendingSavedProfile(profileData);
         setShowSuccessModal(true);
       }
     } catch (err: any) {
       console.error("Error setting custom user profile:", err);
-      setErrorCode("Could not save your physical profile contents to Firestore: " + err.message);
+      if (err.message === "FIRESTORE_WRITE_TIMEOUT") {
+        setErrorCode("TIMEOUT");
+      } else {
+        setErrorCode("Could not save your physical profile contents to Firestore: " + err.message);
+      }
     } finally {
       setSaving(false);
     }
@@ -381,7 +398,72 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
           </p>
         </div>
 
-        {errorCode && (
+        {errorCode === "TIMEOUT" ? (
+          <div className="m-6 p-5 bg-yellow-400/5 border border-yellow-500/30 rounded-sm text-xs font-mono space-y-4">
+            <div className="text-yellow-400 font-bold uppercase tracking-wider flex items-center gap-2">
+              🚨 DATABASE CONNECTION BLOCKED / HANGING (6s TIMEOUT)
+            </div>
+            
+            <p className="text-neutral-300 leading-relaxed uppercase text-[11px]">
+              The application signed in successfully, but your write confirmation to Firestore has timed out. This almost always means:
+            </p>
+            
+            <ol className="list-decimal list-inside space-y-2 text-[10px] text-neutral-400 leading-normal uppercase">
+              <li>
+                <strong className="text-white">Firestore is not initialized:</strong> You created your custom Firebase Project, but have not configured or enabled the <strong className="text-yellow-400">Cloud Firestore</strong> service yet. Go to <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-400 underline hover:text-blue-300 lowercase">console.firebase.google.com</a> &rarr; click on your project &rarr; <strong className="text-white">Firestore Database</strong> &rarr; click <strong className="text-white">'Create Database'</strong>.
+              </li>
+              <li>
+                <strong className="text-white font-mono">Security Rules mismatch:</strong> The firestore security rules on your project might be set to locked mode, denying the write request.
+              </li>
+              <li>
+                <strong className="text-white font-mono">Network congestion:</strong> Your phone's network connection is buffering or blocking websocket traffic.
+              </li>
+            </ol>
+
+            <div className="border-t border-neutral-900 pt-4 space-y-3">
+              <p className="text-[10px] text-zinc-500 uppercase leading-relaxed">
+                💡 ESCAPE HATCH: Want to keep testing instantly right now? Click below to bypass the cloud database and save your profile to your device's offline memory! This lets you unlock 100% of the workout systems instantly.
+              </p>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  const calculatedHeightCm = Math.round((heightFeet * 12 + heightInches) * 2.54);
+                  const profileData: UserProfile = {
+                    uid: userId,
+                    name: name.trim(),
+                    age,
+                    height: calculatedHeightCm,
+                    currentWeight,
+                    goalWeight,
+                    fitnessGoal,
+                    activityLevel,
+                    workoutExperience,
+                    dietaryPreference,
+                    isPrivate,
+                    workoutSessionsPerDay,
+                    twoADaySplitPreference,
+                    dailySchedules,
+                    workoutStreak: initialProfile?.workoutStreak || 0,
+                    createdAt: initialProfile?.createdAt || new Date().toISOString(),
+                    workoutDaysPerWeek,
+                    workoutTypesPref,
+                    primaryWorkoutStyle1,
+                    morningWorkoutStyle2,
+                    eveningWorkoutStyle2
+                  };
+                  localStorage.setItem("fitdeficit_offline_profile_" + userId, JSON.stringify(profileData));
+                  onSave(profileData, "dashboard");
+                }}
+                className="py-2.5 px-4 bg-zinc-900 hover:bg-zinc-800 text-yellow-400 font-mono text-[10px] font-bold uppercase tracking-wider rounded border border-zinc-700 cursor-pointer transition select-none flex items-center gap-1.5"
+                id="btn-timeout-local-bypass"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                BYPASS CLOUD & SAVE OFFLINE ON DEVICE
+              </button>
+            </div>
+          </div>
+        ) : errorCode && (
           <div className="m-6 p-3 bg-red-950/35 border border-red-800 rounded text-red-200 text-xs text-center font-mono">
             ⚠️ {errorCode}
           </div>

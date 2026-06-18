@@ -102,3 +102,13 @@ export interface WorkoutPlan {
   goalType: string;
   days: WorkoutDay[];
 }
+
+export interface CalorieBurnLog {
+  id?: string;
+  userId: string;
+  activityName: string;
+  caloriesBurned: number;
+  date: string; // YYYY-MM-DD
+  timestamp: number;
+}
+

@@ -215,7 +215,7 @@ export default function AuthScreen({ onSuccess }: AuthProps) {
 
                 <div className="space-y-1">
                   <h3 className="text-lg font-mono font-black uppercase text-white tracking-wide">
-                    {isLoginGroup ? "Access Cloud Profile" : "Register Athlete Profile"}
+                    {isLoginGroup ? "Access Cloud Profile" : "Register Cloud Profile"}
                   </h3>
                   <p className="text-xs text-neutral-400 leading-relaxed">
                     Synchronize your metabolic goals, meal databases, and historical progress safely across your desktop and mobile devices.
@@ -306,7 +306,7 @@ export default function AuthScreen({ onSuccess }: AuthProps) {
                           <span className="text-[10px] font-mono font-black uppercase tracking-wider">REGISTRATION COLLISION</span>
                         </div>
                         <p className="text-[9.5px] text-neutral-300 font-mono uppercase pl-6 leading-relaxed font-bold">
-                          The email address <span className="text-white">{email}</span> is already mapped to an active ATHLETE PROFILE.
+                          The email address <span className="text-white">{email}</span> is already mapped to an active USER PROFILE.
                         </p>
                         <p className="text-[9px] text-neutral-500 font-mono uppercase pl-6 leading-normal">
                           💡 Quick patch: Toggle below to email Sign In and input your credentials to restore synchronization.
@@ -370,7 +370,7 @@ export default function AuthScreen({ onSuccess }: AuthProps) {
                   
                   <div className="space-y-1">
                     <label className="block text-[8px] uppercase font-mono tracking-widest text-neutral-500 font-black">
-                      Athlete Email Address
+                      Account Email Address
                     </label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-3.5 h-3.5 w-3.5 text-neutral-600" />
@@ -378,7 +378,7 @@ export default function AuthScreen({ onSuccess }: AuthProps) {
                         type="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="athlete@domain.com"
+                        placeholder="user@domain.com"
                         className="w-full bg-neutral-950 border border-neutral-900 focus:border-yellow-400 text-xs py-3 pl-9 pr-4 outline-none rounded-sm font-mono transition text-white placeholder-neutral-700"
                         required
                         id="input-auth-email"
@@ -437,7 +437,7 @@ export default function AuthScreen({ onSuccess }: AuthProps) {
                 <div className="text-center pt-2">
                   {isLoginGroup ? (
                     <p className="text-[10px] text-neutral-500 font-mono uppercase">
-                      Don't have an athlete profile?{" "}
+                      Don't have a customized profile?{" "}
                       <button
                         type="button"
                         onClick={() => {
@@ -452,7 +452,7 @@ export default function AuthScreen({ onSuccess }: AuthProps) {
                     </p>
                   ) : (
                     <p className="text-[10px] text-neutral-500 font-mono uppercase">
-                      Already have an athlete profile?{" "}
+                      Already have an active profile?{" "}
                       <button
                         type="button"
                         onClick={() => {

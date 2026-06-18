@@ -1,14 +1,19 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { UserProfile, WorkoutPlan, WorkoutDay } from "../types";
 import { generateWorkoutPlan } from "../lib/workouts";
-import { Dumbbell, Sun, Moon, Sparkles, HeartPulse, Clock, FileText, Settings, Coffee } from "lucide-react";
+import { Dumbbell, Sun, Moon, Sparkles, HeartPulse, Clock, FileText, Settings, Coffee, Flame, Plus, Trash2 } from "lucide-react";
+import { collection, query, where, getDocs, addDoc, deleteDoc, doc } from "firebase/firestore";
+import { db } from "../lib/firebase";
 
 interface WorkoutScheduleProps {
   profile: UserProfile;
   onProfileUpdate: (updatedProfile: UserProfile) => void;
+  userId: string;
+  isGuest: boolean;
+  onBurnLogged: () => void;
 }
 
-export default function WorkoutSchedule({ profile, onProfileUpdate }: WorkoutScheduleProps) {
+export default function WorkoutSchedule({ profile, onProfileUpdate, userId, isGuest, onBurnLogged }: WorkoutScheduleProps) {
   if (!profile) {
     return (
       <div className="bg-[#121215] border border-neutral-800 rounded-sm p-6 text-center text-neutral-400 font-mono">
@@ -22,6 +27,116 @@ export default function WorkoutSchedule({ profile, onProfileUpdate }: WorkoutSch
     profile.workoutExperience || "beginner"
   );
   
+  // Calorie Burn States
+  const [activityName, setActivityName] = useState("");
+  const [caloriesBurned, setCaloriesBurned] = useState("");
+  const [burnLogs, setBurnLogs] = useState<any[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [submittingBurn, setSubmittingBurn] = useState(false);
+
+  const loadTodayBurnLogs = async () => {
+    setLoadingLogs(true);
+    const todayStr = new Date().toISOString().split("T")[0];
+    try {
+      if (isGuest) {
+        const logsRaw = localStorage.getItem("fitdeficit_calorie_burn_logs") || "[]";
+        const allLogs = JSON.parse(logsRaw);
+        const filtered = allLogs.filter((l: any) => l.userId === userId && l.date === todayStr);
+        setBurnLogs(filtered);
+      } else {
+        const q = query(
+          collection(db, "calorieBurnLogs"),
+          where("userId", "==", userId),
+          where("date", "==", todayStr)
+        );
+        const snap = await getDocs(q);
+        const list: any[] = [];
+        snap.forEach((docSnap) => {
+          list.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        setBurnLogs(list);
+      }
+    } catch (err) {
+      console.error("Error loading burn logs:", err);
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTodayBurnLogs();
+  }, [userId, isGuest]);
+
+  const handleLogBurn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cals = Math.round(parseFloat(caloriesBurned) || 0);
+    if (!activityName.trim() || cals <= 0) return;
+
+    setSubmittingBurn(true);
+    const todayStr = new Date().toISOString().split("T")[0];
+    const logItem = {
+      userId,
+      activityName: activityName.trim(),
+      caloriesBurned: cals,
+      date: todayStr,
+      timestamp: Date.now()
+    };
+
+    try {
+      if (isGuest) {
+        const logsRaw = localStorage.getItem("fitdeficit_calorie_burn_logs") || "[]";
+        const allLogs = JSON.parse(logsRaw);
+        allLogs.push({ id: "burn_" + Date.now(), ...logItem });
+        localStorage.setItem("fitdeficit_calorie_burn_logs", JSON.stringify(allLogs));
+      } else {
+        // ALWAYS backup to localStorage as well for instant feedback and robust database-offline fallback!
+        const logsRaw = localStorage.getItem("fitdeficit_calorie_burn_logs") || "[]";
+        const allLogs = JSON.parse(logsRaw);
+        allLogs.push({ id: "burn_fallback_" + Date.now(), ...logItem });
+        localStorage.setItem("fitdeficit_calorie_burn_logs", JSON.stringify(allLogs));
+
+        try {
+          // Attempt Firestore save with a 3-second watchdog race
+          const savePromise = addDoc(collection(db, "calorieBurnLogs"), logItem);
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("FIRESTORE_WRITE_TIMEOUT")), 3000);
+          });
+          await Promise.race([savePromise, timeoutPromise]);
+        } catch (dbErr) {
+          console.warn("Firestore save timed out or bypassed, utilizing local storage cache:", dbErr);
+        }
+      }
+
+      setActivityName("");
+      setCaloriesBurned("");
+      await loadTodayBurnLogs();
+      onBurnLogged(); // Notify parent App.tsx to reload totals
+    } catch (err) {
+      console.error("Failed to save calorie burn log:", err);
+      // Extremely robust fallback: even if everything fails, guarantee redirect and local update
+      onBurnLogged();
+    } finally {
+      setSubmittingBurn(false);
+    }
+  };
+
+  const handleDeleteLog = async (logId: string) => {
+    try {
+      if (isGuest) {
+        const logsRaw = localStorage.getItem("fitdeficit_calorie_burn_logs") || "[]";
+        const allLogs = JSON.parse(logsRaw);
+        const filtered = allLogs.filter((l: any) => l.id !== logId);
+        localStorage.setItem("fitdeficit_calorie_burn_logs", JSON.stringify(filtered));
+      } else {
+        await deleteDoc(doc(db, "calorieBurnLogs", logId));
+      }
+      await loadTodayBurnLogs();
+      onBurnLogged(); // Notify parent App.tsx to reload totals
+    } catch (err) {
+      console.error("Failed to delete log item:", err);
+    }
+  };
+  
   // Generate the schedule live from our adaptive alg
   const workoutPlan: WorkoutPlan = generateWorkoutPlan(
     profile.age || 30,
@@ -29,7 +144,8 @@ export default function WorkoutSchedule({ profile, onProfileUpdate }: WorkoutSch
     profile.fitnessGoal || "lose",
     profile.workoutSessionsPerDay || 2,
     profile.twoADaySplitPreference || "cardio-lifting",
-    profile.dailySchedules
+    profile.dailySchedules,
+    profile.workoutTypesPref
   );
 
   const [activeDayIndex, setActiveDayIndex] = useState<number>(0);
@@ -127,6 +243,96 @@ export default function WorkoutSchedule({ profile, onProfileUpdate }: WorkoutSch
             <p className="text-[11px] font-mono leading-relaxed text-neutral-400">
               {activeDay.eveningWeightTraining?.recoveryNote || "Today is scheduled as a structural active-recovery cycle. Focus on deep hydration and high sleep quality to restore metabolic systems."}
             </p>
+          </div>
+
+          {/* Calorie Burn Logger Block */}
+          <div className="bg-neutral-950 p-4 border border-neutral-900 rounded-sm space-y-4">
+            <div className="flex items-center gap-1.5 text-[9px] uppercase font-mono font-bold text-rose-450 border-b border-neutral-900 pb-1.5">
+              <Flame className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+              Active Calorie Burn Logger
+            </div>
+
+            <p className="text-[10px] text-neutral-400 uppercase leading-snug font-mono">
+              Log energy expenditure from workouts. This will automatically increase your allowable calorie goal for the day.
+            </p>
+
+            <form onSubmit={handleLogBurn} className="space-y-3">
+              <div>
+                <label className="text-[9px] text-zinc-500 uppercase tracking-wider font-mono block mb-1">
+                  Activity Context
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g., HIIT Sprint, Morning Lift"
+                  value={activityName}
+                  onChange={(e) => setActivityName(e.target.value)}
+                  className="w-full bg-[#121215] border border-neutral-800 focus:border-neutral-700 text-xs text-white p-2 text-left rounded-sm font-sans placeholder:text-neutral-600 focus:outline-none"
+                  id="input-burn-activity"
+                />
+              </div>
+
+              <div>
+                <label className="text-[9px] text-zinc-500 uppercase tracking-wider font-mono block mb-1">
+                  Calories Burned (kcal)
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  placeholder="e.g., 350"
+                  value={caloriesBurned}
+                  onChange={(e) => setCaloriesBurned(e.target.value)}
+                  className="w-full bg-[#121215] border border-neutral-800 focus:border-neutral-700 text-xs text-white p-2 text-left rounded-sm font-sans placeholder:text-neutral-600 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  id="input-burn-calories"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={submittingBurn}
+                className="w-full py-2 bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-black uppercase tracking-wider rounded-sm transition select-none cursor-pointer flex items-center justify-center gap-1.5"
+                id="btn-submit-calorie-burn"
+              >
+                {submittingBurn ? (
+                  <span>Logging Burn...</span>
+                ) : (
+                  <>
+                    <Plus className="h-3.5 w-3.5" />
+                    Log Active Session
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* List of today's logged burns */}
+            {burnLogs.length > 0 && (
+              <div className="border-t border-neutral-900 pt-3.5 space-y-2">
+                <span className="text-[9px] uppercase font-mono text-zinc-500 block">
+                  Today's logged calories burned
+                </span>
+                
+                <div className="space-y-1.5 max-h-[160px] overflow-y-auto">
+                  {burnLogs.map((log) => (
+                    <div key={log.id} className="flex justify-between items-center bg-[#121215] border border-neutral-900 px-2.5 py-1.5 rounded-sm">
+                      <div className="min-w-0 pr-2">
+                        <span className="text-[11px] text-white font-sans font-medium truncate block uppercase">{log.activityName}</span>
+                        <span className="text-[9px] text-rose-400 font-bold font-mono tracking-wider">{log.caloriesBurned} kcal</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteLog(log.id)}
+                        className="text-neutral-600 hover:text-red-400 p-1 transition cursor-pointer"
+                        title="Delete log"
+                        id={`btn-delete-burn-log-${log.id}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

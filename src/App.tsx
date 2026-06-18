@@ -37,6 +37,7 @@ export default function App() {
 
   // Local sync utilities for dashboard
   const [caloriesEatenToday, setCaloriesEatenToday] = useState(0);
+  const [caloriesBurnedToday, setCaloriesBurnedToday] = useState(0);
   const [proteinEatenToday, setProteinEatenToday] = useState(0);
   const [waterCupsToday, setWaterCupsToday] = useState(0);
   const [workoutCompletedToday, setWorkoutCompletedToday] = useState(false);
@@ -105,18 +106,39 @@ export default function App() {
         return;
       }
 
+      // Add a timeout to getDoc so it never blocks the app from booting if offline or unconfigured
       const docRef = doc(db, "profiles", uid);
-      const docSnap = await getDoc(docRef);
+      const getDocPromise = getDoc(docRef);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("FIRESTORE_READ_TIMEOUT")), 4000);
+      });
+
+      const docSnap = await Promise.race([getDocPromise, timeoutPromise]);
 
       if (docSnap.exists()) {
         const profileData = docSnap.data() as UserProfile;
         setProfile(profileData);
         setIsOnboarding(false);
       } else {
-        setIsOnboarding(true);
+        // No Firestore profile found, let's check local storage offline backups!
+        const offlineProfile = localStorage.getItem("fitdeficit_offline_profile_" + uid);
+        if (offlineProfile) {
+          setProfile(JSON.parse(offlineProfile));
+          setIsOnboarding(false);
+        } else {
+          setIsOnboarding(true);
+        }
       }
     } catch (err) {
       console.error("Failed to load user profile:", err);
+      // Fallback to local storage offline backups!
+      const offlineProfile = localStorage.getItem("fitdeficit_offline_profile_" + uid);
+      if (offlineProfile) {
+        setProfile(JSON.parse(offlineProfile));
+        setIsOnboarding(false);
+      } else {
+        setIsOnboarding(true);
+      }
     }
   };
 
@@ -136,6 +158,16 @@ export default function App() {
         });
         setCaloriesEatenToday(cals);
         setProteinEatenToday(prot);
+
+        // Load Calorie Burn Logs from localStorage
+        const allBurnLogsRaw = localStorage.getItem("fitdeficit_calorie_burn_logs") || "[]";
+        const allBurnLogs = JSON.parse(allBurnLogsRaw);
+        const physicalBurnLogs = allBurnLogs.filter((b: any) => b.userId === currentUser.uid && b.date === todayDateStr);
+        let burnedCals = 0;
+        physicalBurnLogs.forEach((b: any) => {
+          burnedCals += b.caloriesBurned || 0;
+        });
+        setCaloriesBurnedToday(burnedCals);
 
         // Load Water Logs from localStorage
         const waterLogsRaw = localStorage.getItem("fitdeficit_water_logs") || "[]";
@@ -172,6 +204,39 @@ export default function App() {
       });
       setCaloriesEatenToday(cals);
       setProteinEatenToday(prot);
+
+      // 1b. Fetch active calorie burn logs for today
+      let burnedCals = 0;
+      try {
+        const burnQuery = query(
+          collection(db, "calorieBurnLogs"),
+          where("userId", "==", currentUser.uid),
+          where("date", "==", todayDateStr)
+        );
+        const burnSnapshot = await getDocs(burnQuery);
+        burnSnapshot.forEach((docSnap) => {
+          const item = docSnap.data();
+          burnedCals += item.caloriesBurned || 0;
+        });
+      } catch (err) {
+        console.error("Failed to read calorieBurnLogs from Firestore:", err);
+      }
+
+      // Fallback/combine with offline storage just in case they added offline or are guest
+      try {
+        const allBurnLogsRaw = localStorage.getItem("fitdeficit_calorie_burn_logs") || "[]";
+        const allBurnLogs = JSON.parse(allBurnLogsRaw);
+        const physicalBurnLogs = allBurnLogs.filter((b: any) => b.userId === currentUser.uid && b.date === todayDateStr);
+        let localBurned = 0;
+        physicalBurnLogs.forEach((b: any) => {
+          localBurned += b.caloriesBurned || 0;
+        });
+        if (localBurned > burnedCals) {
+          burnedCals = localBurned;
+        }
+      } catch (e) {}
+
+      setCaloriesBurnedToday(burnedCals);
 
       // 2. Fetch water cups for today
       const waterQuery = query(
@@ -364,6 +429,12 @@ export default function App() {
           localStorage.setItem("fitdeficit_water_logs", JSON.stringify(allWater.filter((w: any) => w.userId !== uid)));
         } catch (e) {}
 
+        try {
+          const allBurnRaw = localStorage.getItem("fitdeficit_calorie_burn_logs") || "[]";
+          const allBurn = JSON.parse(allBurnRaw);
+          localStorage.setItem("fitdeficit_calorie_burn_logs", JSON.stringify(allBurn.filter((b: any) => b.userId !== uid)));
+        } catch (e) {}
+
         setDeleteStatusMessage("Clear completed! Goodbye!");
         setTimeout(() => {
           setCurrentUser(null);
@@ -400,6 +471,17 @@ export default function App() {
       const waterSnapshot = await getDocs(waterQuery);
       const waterDeletes = waterSnapshot.docs.map((docSnap) => deleteDoc(doc(db, "waterLogs", docSnap.id)));
       await Promise.all(waterDeletes);
+
+      setDeleteStatusMessage("Incinerating physical activity calorie burn logs...");
+      // 4b. Delete Calorie Burn Logs
+      try {
+        const burnQuery = query(collection(db, "calorieBurnLogs"), where("userId", "==", uid));
+        const burnSnapshot = await getDocs(burnQuery);
+        const burnDeletes = burnSnapshot.docs.map((docSnap) => deleteDoc(doc(db, "calorieBurnLogs", docSnap.id)));
+        await Promise.all(burnDeletes);
+      } catch (err) {
+        console.error("Failed to delete cloud burn logs during purge:", err);
+      }
 
       setDeleteStatusMessage("De-authenticating credentials session instance...");
       // 5. Sign Out & Clear State to Route to Login Screen
@@ -510,7 +592,8 @@ export default function App() {
 
   const currentWorkoutDayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
 
-  const remainingKcal = macros.targetCalories - caloriesEatenToday;
+  const adjustedTargetCalories = (macros.targetCalories || 1500) + caloriesBurnedToday;
+  const remainingKcal = adjustedTargetCalories - caloriesEatenToday;
   const isKcalCrossed = remainingKcal < 0;
 
   const todayWorkoutDay = (() => {
@@ -521,7 +604,8 @@ export default function App() {
       profile.fitnessGoal,
       profile.workoutSessionsPerDay || 2,
       profile.twoADaySplitPreference || "cardio-lifting",
-      profile.dailySchedules
+      profile.dailySchedules,
+      profile.workoutTypesPref
     );
     const weekdaysArr = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const dayNameStr = weekdaysArr[new Date().getDay()];
@@ -661,20 +745,36 @@ export default function App() {
             <section className="flex-1 flex flex-col gap-6">
               
               {/* Highlight Metrics Grid rows */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 
                 {/* Deficit Card updated to display allowable calories (deficit metric target) */}
                 <div className="bg-zinc-900 border-t-4 border-yellow-400 p-6 flex flex-col items-center justify-center gap-1.5 rounded-lg border-x border-b border-zinc-800 shadow-md text-center">
-                  <p className="text-xs font-black uppercase text-zinc-500 tracking-wider">Daily Calorie Target</p>
-                  <p className="text-5xl font-black font-mono text-white tracking-wide">
-                    {macros.targetCalories}
+                  <p className="text-xs font-black uppercase text-zinc-500 tracking-wider">Daily Calorie Goal</p>
+                  <p className="text-4xl font-black font-mono text-white tracking-wide">
+                    {adjustedTargetCalories}
                   </p>
-                  <p className="text-[10px] text-zinc-400 tracking-widest uppercase font-bold">KCAL TO EAT / DAY</p>
+                  <p className="text-[10px] text-zinc-400 tracking-widest uppercase font-bold">KCAL TO EAT TODAY</p>
                   <div className="mt-1 px-2.5 py-0.5 bg-zinc-800/60 border border-zinc-800 rounded-sm text-[10px] font-mono text-zinc-400">
-                    Deficit: <span className={macros.deficitOrSurplus < 0 ? "text-green-400 font-bold" : "text-yellow-400 font-bold"}>
-                      {macros.deficitOrSurplus > 0 ? `+${macros.deficitOrSurplus}` : macros.deficitOrSurplus}
-                    </span> kcal
+                    Base: <span className="text-zinc-350 font-bold">{macros.targetCalories}</span>
+                    {caloriesBurnedToday > 0 && (
+                      <span className="text-green-400 font-bold"> + {caloriesBurnedToday} burn</span>
+                    )}
                   </div>
+                </div>
+
+                {/* Calories Burned Card */}
+                <div className="bg-zinc-900 border-t-4 border-rose-500 p-6 flex flex-col items-center justify-center gap-1.5 rounded-lg border-x border-b border-zinc-800 shadow-md text-center">
+                  <p className="text-xs font-black uppercase text-rose-500 tracking-wider">Calories Burned</p>
+                  <p className="text-4xl font-black font-mono text-white tracking-wide">
+                    {caloriesBurnedToday}
+                  </p>
+                  <p className="text-[10px] text-zinc-400 tracking-widest uppercase font-bold">ACTIVE KCAL BURNED</p>
+                  <button 
+                    onClick={() => setActiveTab("workout")}
+                    className="mt-1.5 py-1 px-2 border border-rose-950/40 bg-zinc-800 hover:bg-zinc-700 text-rose-450 hover:text-rose-350 text-[10px] font-black uppercase transition leading-none select-none cursor-pointer rounded-sm"
+                  >
+                    Log burn &rarr;
+                  </button>
                 </div>
 
                 {/* Protein Card */}
@@ -682,7 +782,7 @@ export default function App() {
                   <p className="text-xs font-black uppercase text-zinc-500">Daily Protein</p>
                   <p className="text-5xl font-black font-mono text-white tracking-widest">{proteinEatenToday}g</p>
                   <p className="text-xs text-zinc-400 tracking-widest uppercase">Goal: {macros.proteinGoal}g</p>
-                  <div className="w-full bg-zinc-800 h-1.5 mt-2 overflow-hidden rounded-full">
+                  <div className="w-full bg-zinc-800 h-1.5 mt-2 overflow-hidden rounded-full font-sans">
                     <div className="bg-white h-full" style={{ width: `${Math.min(100, (proteinEatenToday / (macros.proteinGoal || 1)) * 100)}%` }}></div>
                   </div>
                 </div>
@@ -734,7 +834,7 @@ export default function App() {
                   <div className="w-48 h-48 rounded-full border-[12px] border-zinc-800 relative flex items-center justify-center shrink-0 shadow-lg">
                     <div 
                       className="absolute inset-0 rounded-full border-[12px] border-yellow-400 border-r-transparent border-b-transparent transition-transform duration-300"
-                      style={{ transform: `rotate(${Math.min(360, (caloriesEatenToday / (macros.targetCalories || 1)) * 360)}deg)` }}
+                      style={{ transform: `rotate(${Math.min(360, (caloriesEatenToday / (adjustedTargetCalories || 1)) * 360)}deg)` }}
                     />
                     <div className="text-center z-10 px-2">
                       <span className="block text-4xl font-black text-white font-mono leading-none">{caloriesEatenToday}</span>
@@ -895,7 +995,7 @@ export default function App() {
           <FoodLog 
             userId={currentUser.uid} 
             profile={profile!} 
-            calorieTarget={macros.targetCalories} 
+            calorieTarget={adjustedTargetCalories} 
             proteinTarget={macros.proteinGoal} 
           />
         )}
@@ -904,6 +1004,12 @@ export default function App() {
           <WorkoutSchedule 
             profile={profile!} 
             onProfileUpdate={(updatedProfile) => setProfile(updatedProfile)} 
+            userId={currentUser.uid}
+            isGuest={currentUser.isGuest ? true : false}
+            onBurnLogged={() => {
+              syncDashboardTotals();
+              setActiveTab("dashboard");
+            }}
           />
         )}
 
