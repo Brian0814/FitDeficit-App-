@@ -1054,21 +1054,21 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
             </div>
 
             <div className="bg-neutral-950/85 border border-neutral-900 rounded p-4 text-[10px] uppercase font-mono text-yellow-400/90 leading-normal">
-              💡 CUSTOM PORTAL DISCOVERY: You can find your full day-by-day customized training sheets in the designated <strong className="text-white border-b border-white pb-0.5">Workouts</strong> tab.
+              💡 METRICS APPLIED: Your newly calibrated targets are active and ready on your primary dashboard card!
             </div>
 
             <button
               type="button"
               onClick={() => {
                 if (pendingSavedProfile) {
-                  onSave(pendingSavedProfile, "workout");
+                  onSave(pendingSavedProfile, "dashboard");
                 }
                 setShowSuccessModal(false);
               }}
               className="w-full py-3 bg-yellow-400 hover:bg-yellow-500 text-black font-mono text-xs font-bold uppercase tracking-widest rounded-sm transition cursor-pointer select-none"
               id="btn-modal-go-workouts"
             >
-              EXPLORE CUSTOM WORKOUTS
+              CONTINUE TO DASHBOARD
             </button>
           </div>
         </div>
