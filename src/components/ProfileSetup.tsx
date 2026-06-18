@@ -350,8 +350,7 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
       // Save directly to the firestore under /profiles/{userId} (with localStorage Guest bypass fallback)
       if (userId === "guest_user") {
         localStorage.setItem("fitdeficit_profile_guest_user", JSON.stringify(profileData));
-        setPendingSavedProfile(profileData);
-        setShowSuccessModal(true);
+        onSave(profileData, "dashboard");
       } else {
         // Build a connection check timeout to handle uninitialized database or offline cloud locks instantly
         const docRef = doc(db, "profiles", userId);
@@ -367,8 +366,7 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
         // Backup successfully saved to localStorage as well for offline fallback support
         localStorage.setItem("fitdeficit_offline_profile_" + userId, JSON.stringify(profileData));
 
-        setPendingSavedProfile(profileData);
-        setShowSuccessModal(true);
+        onSave(profileData, "dashboard");
       }
     } catch (err: any) {
       console.error("Error setting custom user profile:", err);
