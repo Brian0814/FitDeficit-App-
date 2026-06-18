@@ -20,6 +20,11 @@ export interface UserProfile {
   workoutSessionsPerDay?: 1 | 2;
   twoADaySplitPreference?: string;
   dailySchedules?: Record<string, DailyScheduleConfig>;
+  workoutDaysPerWeek?: number;
+  workoutTypesPref?: string[];
+  primaryWorkoutStyle1?: string;
+  morningWorkoutStyle2?: string;
+  eveningWorkoutStyle2?: string;
   lastActiveDate?: string; // YYYY-MM-DD
   weightHistoryVisible?: boolean; // toggle to show actual weight to community
   createdAt: string;

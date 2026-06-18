@@ -493,10 +493,10 @@ export default function App() {
         <ProfileSetup 
           userId={currentUser.uid} 
           userEmail={currentUser.email || "user@fitdeficit.com"} 
-          onSave={(newProfile) => {
+          onSave={(newProfile, targetTab) => {
             setProfile(newProfile);
             setIsOnboarding(false);
-            setActiveTab("dashboard");
+            setActiveTab(targetTab || "dashboard");
           }} 
         />
       </div>
@@ -579,7 +579,7 @@ export default function App() {
           {[
             { id: "dashboard", label: "Dashboard", Icon: Award },
             { id: "food", label: "Meals Log", Icon: Utensils },
-            { id: "workout", label: "Workout Splits", Icon: Route },
+            { id: "workout", label: "Workouts", Icon: Route },
             { id: "chat", label: "AI Coach", Icon: Sparkles },
             { id: "weight", label: "Weight Records", Icon: Scale },
             { id: "community", label: "Community", Icon: Users },
@@ -855,7 +855,7 @@ export default function App() {
                     </p>
                   )}
                   <button onClick={() => setActiveTab("workout")} className="w-full py-2 bg-black text-white text-[10px] font-black uppercase tracking-wider block text-center rounded-sm transition hover:bg-zinc-900 cursor-pointer">
-                    Workout Splits Matrix
+                    My Workouts Matrix
                   </button>
                 </div>
               </div>
@@ -937,9 +937,9 @@ export default function App() {
             <ProfileSetup 
               userId={currentUser.uid} 
               userEmail={currentUser.email || "user@fitdeficit.com"} 
-              onSave={(updatedProfile) => {
+              onSave={(updatedProfile, targetTab) => {
                 setProfile(updatedProfile);
-                setActiveTab("dashboard");
+                setActiveTab(targetTab || "dashboard");
               }} 
               initialProfile={profile}
             />

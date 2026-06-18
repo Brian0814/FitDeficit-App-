@@ -3,12 +3,12 @@ import { doc, setDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { UserProfile } from "../types";
 import { calculateMacros } from "../lib/calculators";
-import { Dumbbell, Save, Eye, EyeOff, Scale, User, Calendar, Activity } from "lucide-react";
+import { Dumbbell, Save, Eye, EyeOff, Scale, User, Calendar, Activity, Sparkles, CheckCircle2 } from "lucide-react";
 
 interface ProfileSetupProps {
   userId: string;
   userEmail: string;
-  onSave: (profile: UserProfile) => void;
+  onSave: (profile: UserProfile, targetTab?: string) => void;
   initialProfile?: UserProfile | null;
 }
 
@@ -29,8 +29,27 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
   const [workoutExperience, setWorkoutExperience] = useState<"beginner" | "intermediate" | "advanced">(initialProfile?.workoutExperience || "beginner");
   const [dietaryPreference, setDietaryPreference] = useState<string>(initialProfile?.dietaryPreference || "None");
   const [isPrivate, setIsPrivate] = useState<boolean>(initialProfile?.isPrivate ?? true);
-  const [workoutSessionsPerDay, setWorkoutSessionsPerDay] = useState<1 | 2>((initialProfile?.workoutSessionsPerDay as 1 | 2) || 2);
-  
+  const [workoutSessionsPerDay, setWorkoutSessionsPerDay] = useState<1 | 2>(
+    (initialProfile?.workoutSessionsPerDay as 1 | 2) || 1
+  );
+  const [workoutDaysPerWeek, setWorkoutDaysPerWeek] = useState<number>(
+    initialProfile?.workoutDaysPerWeek || 4
+  );
+  const [workoutTypesPref, setWorkoutTypesPref] = useState<string[]>(
+    initialProfile?.workoutTypesPref || ["lifting", "cardio"]
+  );
+  const [primaryWorkoutStyle1, setPrimaryWorkoutStyle1] = useState<string>(
+    initialProfile?.primaryWorkoutStyle1 || "strength"
+  );
+  const [morningWorkoutStyle2, setMorningWorkoutStyle2] = useState<string>(
+    initialProfile?.morningWorkoutStyle2 || "cardio"
+  );
+  const [eveningWorkoutStyle2, setEveningWorkoutStyle2] = useState<string>(
+    initialProfile?.eveningWorkoutStyle2 || "strength"
+  );
+  const [showSuccessModal, setShowSuccessModal] = useState<boolean>(false);
+  const [pendingSavedProfile, setPendingSavedProfile] = useState<UserProfile | null>(null);
+
   // Custom split mapping with backward compatibility
   const getInitialSplits = () => {
     const rawVal = initialProfile?.twoADaySplitPreference || "cardio-lifting";
@@ -96,6 +115,128 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
       }
     }));
   };
+
+  const generateWeeklyFromMetrics = (
+    freq: 1 | 2,
+    daysCount: number,
+    types: string[],
+    goal: "lose" | "tone" | "maintain" | "gain" | "lose_tone"
+  ): Record<string, { sessions: 1 | 2 | 0; s1: string; s2: string }> => {
+    const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    
+    let activeDays: string[] = [];
+    switch (daysCount) {
+      case 1: activeDays = ["Wednesday"]; break;
+      case 2: activeDays = ["Tuesday", "Thursday"]; break;
+      case 3: activeDays = ["Monday", "Wednesday", "Friday"]; break;
+      case 4: activeDays = ["Monday", "Wednesday", "Friday", "Saturday"]; break;
+      case 5: activeDays = ["Monday", "Tuesday", "Wednesday", "Friday", "Saturday"]; break;
+      case 6: activeDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]; break;
+      case 7: activeDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]; break;
+      default: activeDays = ["Monday", "Wednesday", "Friday", "Saturday"]; break;
+    }
+
+    const result: Record<string, { sessions: 1 | 2 | 0; s1: string; s2: string }> = {};
+    const styleCycle = types.length > 0 ? types : ["lifting", "cardio"];
+
+    let activeIdx = 0;
+    daysOfWeek.forEach((dayName) => {
+      if (!activeDays.includes(dayName)) {
+        result[dayName] = { sessions: 0, s1: "mobility", s2: "mobility" };
+      } else {
+        if (freq === 1) {
+          const currentStyle = styleCycle[activeIdx % styleCycle.length];
+          let s1 = "cardio";
+          let s2 = "lifting";
+
+          if (currentStyle === "lifting") {
+            s1 = "cardio";
+            if (activeIdx % 2 === 0) {
+              s2 = (goal === "gain") ? "lifting" : "upper-strength";
+            } else {
+              s2 = "lower";
+            }
+          } else if (currentStyle === "cardio") {
+            s1 = "cardio";
+            s2 = "cardio";
+          } else if (currentStyle === "conditioning") {
+            s1 = "conditioning";
+            s2 = "conditioning";
+          } else if (currentStyle === "mobility") {
+            s1 = "mobility";
+            s2 = "mobility";
+          } else if (currentStyle === "core") {
+            s1 = "core";
+            s2 = "core";
+          } else {
+            s1 = "cardio";
+            s2 = "lifting";
+          }
+          result[dayName] = { sessions: 1, s1, s2 };
+        } else {
+          const currentStyle = styleCycle[activeIdx % styleCycle.length];
+          const secondStyle = styleCycle[(activeIdx + 1) % styleCycle.length];
+
+          let s1 = "cardio";
+          let s2 = "lifting";
+
+          if (currentStyle === "cardio") {
+            s1 = "cardio";
+          } else if (currentStyle === "conditioning") {
+            s1 = "conditioning";
+          } else if (currentStyle === "mobility") {
+            s1 = "mobility";
+          } else if (currentStyle === "lifting") {
+            s1 = (goal === "gain") ? "heavy" : "upper";
+          } else if (currentStyle === "core") {
+            s1 = "mobility";
+          }
+
+          if (secondStyle === "lifting") {
+            s2 = (activeIdx % 2 === 0) ? "lifting" : "lower";
+          } else if (secondStyle === "core") {
+            s2 = "core";
+          } else if (secondStyle === "mobility") {
+            s2 = "mobility";
+          } else if (secondStyle === "cardio") {
+            s2 = "mobility";
+            if (currentStyle !== "cardio") {
+              s1 = "cardio";
+              s2 = (goal === "gain") ? "lifting" : "upper-strength";
+            }
+          } else if (secondStyle === "conditioning") {
+            s2 = "core";
+            if (currentStyle !== "conditioning") {
+              s1 = "conditioning";
+              s2 = "lifting";
+            }
+          }
+
+          if (goal === "gain" && s1 === "cardio") {
+            s1 = "heavy";
+          }
+          if (goal === "lose" && s2 === "lifting" && activeIdx % 2 === 1) {
+            s2 = "core";
+          }
+
+          result[dayName] = { sessions: 2, s1, s2 };
+        }
+        activeIdx++;
+      }
+    });
+
+    return result;
+  };
+
+  useEffect(() => {
+    const computed = generateWeeklyFromMetrics(
+      workoutSessionsPerDay,
+      workoutDaysPerWeek,
+      workoutTypesPref,
+      fitnessGoal
+    );
+    setDailySchedules(computed);
+  }, [workoutSessionsPerDay, workoutDaysPerWeek, workoutTypesPref, fitnessGoal]);
 
   useEffect(() => {
     setTwoADaySplitPreference(`${session1Pref}-${session2Pref}`);
@@ -197,17 +338,24 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
       twoADaySplitPreference,
       dailySchedules,
       workoutStreak: initialProfile?.workoutStreak || 0,
-      createdAt: initialProfile?.createdAt || new Date().toISOString()
+      createdAt: initialProfile?.createdAt || new Date().toISOString(),
+      workoutDaysPerWeek,
+      workoutTypesPref,
+      primaryWorkoutStyle1,
+      morningWorkoutStyle2,
+      eveningWorkoutStyle2
     };
 
     try {
       // Save directly to the firestore under /profiles/{userId} (with localStorage Guest bypass fallback)
       if (userId === "guest_user") {
         localStorage.setItem("fitdeficit_profile_guest_user", JSON.stringify(profileData));
-        onSave(profileData);
+        setPendingSavedProfile(profileData);
+        setShowSuccessModal(true);
       } else {
         await setDoc(doc(db, "profiles", userId), profileData);
-        onSave(profileData);
+        setPendingSavedProfile(profileData);
+        setShowSuccessModal(true);
       }
     } catch (err: any) {
       console.error("Error setting custom user profile:", err);
@@ -422,7 +570,7 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
 
                 <div>
                   <label className="block text-xs uppercase font-mono text-neutral-400 mb-2">
-                    Primary Fitness Metric
+                    Primary Fitness Goal
                   </label>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                     {[
@@ -494,158 +642,97 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
                   </div>
                 </div>
 
-                {/* Day-by-Day Customizable Training Matrix Builder */}
-                <div className="bg-neutral-950 p-4 border border-neutral-900 rounded-sm space-y-6">
-                  <div>
-                    <h4 className="text-xs uppercase font-mono text-yellow-400 font-extrabold tracking-wider">
-                      Weekly Training Matrix Builder
-                    </h4>
-                    <p className="text-[10px] text-neutral-500 font-mono mt-0.5">
-                      Configure your sessions uniquely for each day. Customize splits, insert rest/recovery days, or schedule advanced two-a-days.
-                    </p>
+                {/* Simplified Workout Configuration Form */}
+                <div className="bg-neutral-950 p-5 border border-neutral-900 rounded-sm space-y-6">
+                  {/* Q1: Times a day */}
+                  <div className="space-y-2">
+                    <label className="block text-xs uppercase font-mono text-neutral-400">
+                      1. How many times a day do you work out?
+                    </label>
+                    <div className="flex gap-2">
+                      {[1, 2].map((num) => (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => setWorkoutSessionsPerDay(num as 1 | 2)}
+                          className={`flex-1 py-2.5 font-mono text-xs uppercase border rounded-sm transition cursor-pointer select-none ${
+                            workoutSessionsPerDay === num
+                              ? "bg-yellow-400 border-yellow-400 text-black font-extrabold"
+                              : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                          }`}
+                        >
+                          {num === 1 ? "1 Workout a Day" : "2 Workouts a Day (Two-a-Day)"}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="space-y-4">
-                    {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((dayName) => {
-                      const dayConf = dailySchedules[dayName] || { sessions: 2, s1: "cardio", s2: "lifting" };
-                      return (
-                        <div key={dayName} className="p-3 bg-neutral-900/40 border border-neutral-800 rounded-sm space-y-3 animate-fadeIn">
-                          {/* Day Header Row */}
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-900 pb-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs uppercase font-mono font-bold text-white tracking-wide">
-                                {dayName}
-                              </span>
-                              <span className={`text-[8px] font-mono px-2 py-0.5 rounded-full uppercase font-bold ${
-                                dayConf.sessions === 0
-                                  ? "bg-neutral-800 text-neutral-400"
-                                  : dayConf.sessions === 1
-                                    ? "bg-blue-400/10 text-blue-400 border border-blue-400/20"
-                                    : "bg-yellow-400/10 text-yellow-400 border border-yellow-400/20"
-                              }`}>
-                                {dayConf.sessions === 0 && "Rest & Recovery"}
-                                {dayConf.sessions === 1 && "1 Session Scheduled"}
-                                {dayConf.sessions === 2 && "2 Sessions Scheduled"}
-                              </span>
-                            </div>
-
-                            {/* Session Count Option Toggle Buttons */}
-                            <div className="flex items-center gap-1 font-mono text-[9px] self-start sm:self-auto">
-                              <button
-                                type="button"
-                                onClick={() => updateDaySchedule(dayName, { sessions: 0 })}
-                                className={`px-2.5 py-1 rounded-xs border transition cursor-pointer ${
-                                  dayConf.sessions === 0
-                                    ? "bg-neutral-800 border-neutral-600 text-white font-extrabold"
-                                    : "bg-neutral-950 border-neutral-900 text-neutral-500 hover:text-neutral-300"
-                                }`}
-                              >
-                                REST DAY
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => updateDaySchedule(dayName, { sessions: 1 })}
-                                className={`px-2.5 py-1 rounded-xs border transition cursor-pointer ${
-                                  dayConf.sessions === 1
-                                    ? "bg-blue-400/10 border-blue-400/30 text-blue-400 font-extrabold"
-                                    : "bg-neutral-950 border-neutral-900 text-neutral-500 hover:text-neutral-300"
-                                }`}
-                              >
-                                1 SESSION
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => updateDaySchedule(dayName, { sessions: 2 })}
-                                className={`px-2.5 py-1 rounded-xs border transition cursor-pointer ${
-                                  dayConf.sessions === 2
-                                    ? "bg-yellow-400/10 border-yellow-400/30 text-yellow-400 font-extrabold"
-                                    : "bg-neutral-950 border-neutral-900 text-neutral-500 hover:text-neutral-300"
-                                }`}
-                              >
-                                TWO-A-DAY
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Conditional Selectors */}
-                          {dayConf.sessions > 0 && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 transition">
-                              {dayConf.sessions === 1 ? (
-                                <div className="sm:col-span-2 space-y-1">
-                                  <label className="block text-[9px] uppercase font-mono text-neutral-400">
-                                    Primary Workout Focus Style
-                                  </label>
-                                  <select
-                                    value={dayConf.s2 === "lifting" ? dayConf.s1 : dayConf.s2}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      // If user picks strength, we save to s2 as target workout; if cardio, s1 as target
-                                      if (["cardio", "conditioning", "mobility"].includes(val)) {
-                                        updateDaySchedule(dayName, { s1: val, s2: "lifting" });
-                                      } else {
-                                        updateDaySchedule(dayName, { s1: "cardio", s2: val });
-                                      }
-                                    }}
-                                    className="w-full bg-neutral-950 border border-neutral-800 focus:border-yellow-400 text-xs py-2 px-2.5 rounded-sm text-neutral-200 cursor-pointer outline-none"
-                                  >
-                                    <option value="cardio">☀️ Cardio Burn & Aerobic Base</option>
-                                    <option value="upper">🏋️ Upper Body Strength Focus</option>
-                                    <option value="lower">🏋️ Lower Body Target Split</option>
-                                    <option value="heavy">💪 Heavy Strength & Power Compounds</option>
-                                    <option value="conditioning">🏃 Athletic Conditioning & Speed</option>
-                                    <option value="core">🧩 Core Stabilization & Ab Shred</option>
-                                    <option value="mobility">🧘 Deep Flex & Active Mobility Recovery</option>
-                                  </select>
-                                </div>
-                              ) : (
-                                <>
-                                  <div className="space-y-1">
-                                    <label className="block text-[9px] uppercase font-mono text-neutral-400 flex items-center gap-1">
-                                      ☀️ Morning Session (Session 1)
-                                    </label>
-                                    <select
-                                      value={dayConf.s1}
-                                      onChange={(e) => updateDaySchedule(dayName, { s1: e.target.value })}
-                                      className="w-full bg-neutral-950 border border-neutral-800 focus:border-yellow-400 text-xs py-2 px-2.5 rounded-sm text-neutral-200 cursor-pointer outline-none"
-                                    >
-                                      <option value="cardio">☀️ Cardio Burn & Aerobic Base</option>
-                                      <option value="upper">☀️ Upper Body Strength Activation</option>
-                                      <option value="heavy">☀️ Heavy Lift Compounds</option>
-                                      <option value="conditioning">☀️ Athletic Speed & Conditioning</option>
-                                      <option value="mobility">☀️ Dynamic Mobility & Joint Release</option>
-                                    </select>
-                                  </div>
-
-                                  <div className="space-y-1">
-                                    <label className="block text-[9px] uppercase font-mono text-neutral-400 flex items-center gap-1">
-                                      🌙 Evening Session (Session 2)
-                                    </label>
-                                    <select
-                                      value={dayConf.s2}
-                                      onChange={(e) => updateDaySchedule(dayName, { s2: e.target.value })}
-                                      className="w-full bg-neutral-950 border border-neutral-800 focus:border-yellow-400 text-xs py-2 px-2.5 rounded-sm text-neutral-200 cursor-pointer outline-none"
-                                    >
-                                      <option value="lifting">🌙 Hypertrophy & Density Sculpting</option>
-                                      <option value="lower">🌙 Lower Body Target Leg Split</option>
-                                      <option value="upper-strength">🌙 Upper Body Sculpt Finishers</option>
-                                      <option value="core">🌙 Core Stabilization & Ab Shred</option>
-                                      <option value="mobility">🌙 Deep Stretch & Recovery Fascia</option>
-                                    </select>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          )}
-
-                          {dayConf.sessions === 0 && (
-                            <div className="text-[10px] text-neutral-500 font-mono italic">
-                              😴 Full day allocated for muscle reconstruction, neural decompression, and mobility.
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                  {/* Q2: Days per week */}
+                  <div className="space-y-2">
+                    <label className="block text-xs uppercase font-mono text-neutral-400">
+                      2. How many days a week do you work out?
+                    </label>
+                    <div className="grid grid-cols-7 gap-1">
+                      {[1, 2, 3, 4, 5, 6, 7].map((num) => (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => setWorkoutDaysPerWeek(num)}
+                          className={`py-2 text-center font-mono text-xs uppercase border rounded-xs transition cursor-pointer select-none ${
+                            workoutDaysPerWeek === num
+                              ? "bg-yellow-400 border-yellow-400 text-black font-extrabold"
+                              : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                          }`}
+                        >
+                          {num}d
+                        </button>
+                      ))}
+                    </div>
                   </div>
+
+                  {/* Q3: What they typically work out on (Check one or all checkboxes) */}
+                  <div className="space-y-2">
+                    <label className="block text-xs uppercase font-mono text-neutral-400">
+                      3. What do you typically work out on? (Check all that apply)
+                    </label>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
+                      {[
+                        { code: "lifting", label: "Strength Training & Dumbbell Lifts" },
+                        { code: "cardio", label: "Cardio Burn, Running & Cycling" },
+                        { code: "conditioning", label: "HIIT & Advanced Circuit Training" },
+                        { code: "mobility", label: "Yoga, Deep Stretching & Recovery" },
+                        { code: "core", label: "Abs & Core Stabilization" }
+                      ].map((item) => {
+                        const isChecked = workoutTypesPref.includes(item.code);
+                        return (
+                          <label
+                            key={item.code}
+                            className={`flex items-center gap-3 p-3 bg-neutral-900 border rounded-sm transition cursor-pointer select-none ${
+                              isChecked ? "border-yellow-400/50 bg-yellow-400/5 text-white animate-fadeIn" : "border-neutral-850 text-neutral-400 hover:text-white"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                if (isChecked) {
+                                  if (workoutTypesPref.length > 1) {
+                                    setWorkoutTypesPref(workoutTypesPref.filter((b) => b !== item.code));
+                                  }
+                                } else {
+                                  setWorkoutTypesPref([...workoutTypesPref, item.code]);
+                                }
+                              }}
+                              className="accent-yellow-400 w-4 h-4 rounded cursor-pointer shrink-0"
+                            />
+                            <span className="text-xs font-mono font-medium">{item.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
 
                   {/* Ribbon summarizing everything together */}
                   {(() => {
@@ -716,7 +803,6 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
                       </div>
                     );
                   })()}
-                </div>
 
                 <div>
                   <label className="block text-xs uppercase font-mono text-neutral-400 mb-1.5">
@@ -864,6 +950,47 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
 
         </form>
       </div>
+
+      {showSuccessModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="bg-[#121215] border border-neutral-850 rounded-sm p-6 md:p-8 max-w-md w-full space-y-6 text-center shadow-2xl relative overflow-hidden">
+            <div className="absolute -right-16 -top-16 opacity-5 pointer-events-none text-yellow-400">
+              <Dumbbell className="h-48 w-48" />
+            </div>
+            
+            <div className="mx-auto h-16 w-16 bg-yellow-400/10 border border-yellow-400/30 rounded-full flex items-center justify-center text-yellow-400 mb-2">
+              <Sparkles className="h-8 w-8 animate-pulse" />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm uppercase font-mono font-extrabold tracking-widest text-neutral-300">
+                METRICS SAVED & SPLITS GENERATED
+              </h3>
+              <p className="text-[11px] font-mono text-neutral-400 leading-relaxed uppercase">
+                Your daily calorie target is re-budgeted, and your customized exercise routines are freshly synthesized in real-time based on your target intensity patterns!
+              </p>
+            </div>
+
+            <div className="bg-neutral-950/85 border border-neutral-900 rounded p-4 text-[10px] uppercase font-mono text-yellow-400/90 leading-normal">
+              💡 CUSTOM PORTAL DISCOVERY: You can find your full day-by-day customized training sheets in the designated <strong className="text-white border-b border-white pb-0.5">Workouts</strong> tab.
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (pendingSavedProfile) {
+                  onSave(pendingSavedProfile, "workout");
+                }
+                setShowSuccessModal(false);
+              }}
+              className="w-full py-3 bg-yellow-400 hover:bg-yellow-500 text-black font-mono text-xs font-bold uppercase tracking-widest rounded-sm transition cursor-pointer select-none"
+              id="btn-modal-go-workouts"
+            >
+              EXPLORE CUSTOM WORKOUTS
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, doc, deleteDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { UserProfile } from "../types";
-import { Shield, Eye, Lock, Search, HeartPulse, Sparkles, Filter, Scale, Users, Trophy } from "lucide-react";
+import { Shield, Eye, Lock, Search, HeartPulse, Sparkles, Filter, Scale, Users, Trophy, Trash2 } from "lucide-react";
 
 export default function AdminPortal() {
   const [isAdminAuth, setIsAdminAuth] = useState(false);
@@ -13,6 +13,8 @@ export default function AdminPortal() {
   const [loading, setLoading] = useState(false);
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleVerifyPassword = (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +51,25 @@ export default function AdminPortal() {
       console.error("Admin user fetch failure:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const executeDeleteUser = async (userId: string) => {
+    try {
+      setErrorMessage(null);
+      if (localStorage.getItem("fitdeficit_guest_mode") === "true" || userId === "guest_user") {
+        setUsersList((prev) => prev.filter((u) => u.uid !== userId));
+        setDeletingUserId(null);
+        return;
+      }
+      
+      await deleteDoc(doc(db, "profiles", userId));
+      setUsersList((prev) => prev.filter((u) => u.uid !== userId));
+      setDeletingUserId(null);
+    } catch (err: any) {
+      console.error("Deletion error:", err);
+      setErrorMessage(`CRITICAL DELETION FAILURE: ${err.message || err}`);
+      setDeletingUserId(null);
     }
   };
 
@@ -209,6 +230,12 @@ export default function AdminPortal() {
 
       </div>
 
+      {errorMessage && (
+        <div className="p-3 bg-red-950/20 border border-red-900 text-red-400 font-mono text-[11px] uppercase rounded">
+          ⚠️ {errorMessage}
+        </div>
+      )}
+
       {/* Users table list with search filter controls */}
       <div className="space-y-3">
         <div className="flex bg-neutral-950 p-2 border border-neutral-900 rounded-sm items-center gap-2">
@@ -244,6 +271,7 @@ export default function AdminPortal() {
                   <th className="py-3 px-4 font-semibold">Diet style</th>
                   <th className="py-3 px-4 font-semibold">Streak</th>
                   <th className="py-3 px-4 font-semibold">Access</th>
+                  <th className="py-3 px-4 font-semibold text-right">Shell action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-900 text-neutral-300">
@@ -267,6 +295,37 @@ export default function AdminPortal() {
                         <span className="text-red-400 flex items-center gap-1">🔒 Private</span>
                       ) : (
                         <span className="text-green-400 flex items-center gap-1">👥 Public</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      {deletingUserId === user.uid ? (
+                        <div className="flex items-center justify-end gap-1.5 animate-fadeIn">
+                          <button
+                            type="button"
+                            onClick={() => executeDeleteUser(user.uid)}
+                            className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white font-mono text-[9px] font-bold uppercase rounded cursor-pointer transition select-none"
+                            id={`btn-admin-confirm-${user.uid}`}
+                          >
+                            CONFIRM RM
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeletingUserId(null)}
+                            className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white font-mono text-[9px] font-bold uppercase rounded cursor-pointer transition select-none"
+                            id={`btn-admin-cancel-${user.uid}`}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setDeletingUserId(user.uid)}
+                          className="px-2 py-1 bg-neutral-900 hover:bg-red-950/40 border border-neutral-800 hover:border-red-900/50 text-neutral-400 hover:text-red-400 font-mono text-[9px] font-bold uppercase rounded transition cursor-pointer select-none"
+                          id={`btn-admin-remove-${user.uid}`}
+                        >
+                          REMOVE USER
+                        </button>
                       )}
                     </td>
                   </tr>
