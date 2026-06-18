@@ -145,7 +145,8 @@ export default function WorkoutSchedule({ profile, onProfileUpdate, userId, isGu
     profile.workoutSessionsPerDay || 2,
     profile.twoADaySplitPreference || "cardio-lifting",
     profile.dailySchedules,
-    profile.workoutTypesPref
+    profile.workoutTypesPref,
+    profile.weeklyRateOfChange
   );
 
   const [activeDayIndex, setActiveDayIndex] = useState<number>(0);

@@ -103,36 +103,47 @@ export function generateWorkoutPlan(
   sessionsPerDay: 1 | 2 = 2,
   twoADaySplit: string = "cardio-lifting",
   dailySchedules?: Record<string, DailyScheduleConfig>,
-  workoutTypesPref?: string[]
+  workoutTypesPref?: string[],
+  weeklyRateOfChange?: number
 ): WorkoutPlan {
   // Set reps and sets scaling based on experience and goal adjustments
   let setsMultiplier = 3;
   let repRange = "10-12";
   let restTime = "60s";
 
+  const isHighIntensityRate = weeklyRateOfChange !== undefined && weeklyRateOfChange >= 1.5;
+
   if (experience === "beginner") {
     setsMultiplier = 3;
     repRange = goal === "gain" ? "10-12" : "12-15 (Lighter weight)";
-    restTime = "90s (More recovery)";
+    restTime = goal === "gain" ? "90s (Primary strength recovery)" : "90s (More recovery)";
   } else if (experience === "intermediate") {
     setsMultiplier = 4;
     repRange = goal === "gain" ? "8-10" : "10-12 (Moderate weight)";
-    restTime = "60s";
+    restTime = goal === "gain" ? "90s (Extended rest for heavy lift output)" : "60s";
   } else if (experience === "advanced") {
     setsMultiplier = 4;
     repRange = goal === "gain" ? "6-8 (Heavy strength loads)" : "8-10 (Heavy weight, final drop set)";
-    restTime = goal === "gain" ? "90s" : "45-60s";
+    restTime = goal === "gain" ? "120s (Full ATP-CP creatine system recovery)" : (isHighIntensityRate ? "45s (Aggressive high-density pacing)" : "45-60s");
   }
 
   // Adjust routine focusing on age (recovery is key for >=40)
   const isOlderUser = age >= 40;
-  const ageRecoveryNote = isOlderUser
+  let ageRecoveryNote = isOlderUser
     ? "Aged 40+ Focus: Prioritize joint-longevity. Perform slow negatives (3-count descent) and support active recovery with daily mobility. Never lift through joint pain."
     : "Focus on progressive overload: increment weights or adjust reps weekly while retaining clean concentric control.";
 
+  if (goal === "gain") {
+    ageRecoveryNote += " Goal Customization: Slow down the reps, squeeze the target muscle for peak contraction, and eat in a steady calorie surplus to allow muscle rebuild.";
+  } else if (isHighIntensityRate) {
+    ageRecoveryNote += " Goal Customization: High target rate of dynamic loss selected. Focus on minimal rest, pacing, and core stabilization during heavy movements.";
+  }
+
   const cardioActivity = goal === "gain"
-    ? "Incline Walk or Low-Intensity Cycling (preserve calories for growth)"
-    : "Stair Climber, Running intervals, or HIIT Cycling";
+    ? "15-20 mins Low-Intensity Steady-State (LISS) Walk or Low-Resistance Cycling (Strictly preserve coloric surplus for muscle growth)"
+    : (isHighIntensityRate 
+       ? "45-60 mins Intense Stair Climber, Fast Running intervals, or HIIT Cycling (Customized high-burn protocol)" 
+       : "Stair Climber, Running intervals, or HIIT Cycling");
 
   // Standard Weekday defaults
   const DEFAULT_SCHEDULES: Record<string, DailyScheduleConfig> = {

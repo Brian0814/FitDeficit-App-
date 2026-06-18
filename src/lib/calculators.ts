@@ -27,25 +27,28 @@ export function calculateMacros(profile: UserProfile): CalorieCalculations {
   let deficitOrSurplus = 0;
   let targetCalories = maintenanceCalories;
 
-  if (fitnessGoal === "lose") {
-    deficitOrSurplus = -500; // Safe 500 kcal deficit (appx 1 lb fat loss per week)
-    targetCalories = maintenanceCalories - 500;
-    // Set a safety floor
+  // Resolve target rate of weekly change
+  let rateOfChange = profile.weeklyRateOfChange !== undefined 
+    ? profile.weeklyRateOfChange 
+    : (fitnessGoal === "lose" ? 1.0 
+       : fitnessGoal === "lose_tone" ? 0.75 
+       : fitnessGoal === "tone" ? 0.5 
+       : fitnessGoal === "gain" ? 0.5 
+       : 0);
+
+  if (fitnessGoal === "lose" || fitnessGoal === "lose_tone" || fitnessGoal === "tone") {
+    const deficit = Math.round(rateOfChange * 500);
+    deficitOrSurplus = -deficit;
+    targetCalories = maintenanceCalories - deficit;
+    // Set a safety floor (never drop below 1200 kcal for general physical safety)
     if (targetCalories < 1200) {
       targetCalories = 1200;
       deficitOrSurplus = targetCalories - maintenanceCalories;
     }
-  } else if (fitnessGoal === "lose_tone") {
-    deficitOrSurplus = -375; // Hybrid recomposition deficit (sweet spot for burning fat & building muscle)
-    targetCalories = maintenanceCalories - 375;
-    if (targetCalories < 1200) targetCalories = 1200;
-  } else if (fitnessGoal === "tone") {
-    deficitOrSurplus = -250; // Modest deficit for lean recomposition
-    targetCalories = maintenanceCalories - 250;
-    if (targetCalories < 1200) targetCalories = 1200;
   } else if (fitnessGoal === "gain") {
-    deficitOrSurplus = 300; // Modest surplus for lean muscle gain (+300 kcal)
-    targetCalories = maintenanceCalories + 300;
+    const surplus = Math.round(rateOfChange * 500);
+    deficitOrSurplus = surplus;
+    targetCalories = maintenanceCalories + surplus;
   } else {
     deficitOrSurplus = 0;
     targetCalories = maintenanceCalories;
@@ -58,7 +61,7 @@ export function calculateMacros(profile: UserProfile): CalorieCalculations {
   if (weightDelta > 0 && Math.abs(deficitOrSurplus) > 0) {
     const calorieWeeklyDelta = Math.abs(deficitOrSurplus) * 7;
     const lbsPerWeek = calorieWeeklyDelta / 3500;
-    timelineWeeks = Math.ceil(weightDelta / lbsPerWeek);
+    timelineWeeks = Math.ceil(weightDelta / (lbsPerWeek || 0.1));
   }
 
   // Protein targets: ~1.0g per lb of goal weight (or current weight for tone/loss)

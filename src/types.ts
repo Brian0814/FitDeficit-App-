@@ -17,6 +17,7 @@ export interface UserProfile {
   dietaryPreference: string; // e.g. "None", "Keto", "Vegan", "High-Protein"
   isPrivate: boolean;
   workoutStreak: number;
+  weeklyRateOfChange?: number; // target lbs change per week (e.g. 1.0, 1.5)
   workoutSessionsPerDay?: 1 | 2;
   twoADaySplitPreference?: string;
   dailySchedules?: Record<string, DailyScheduleConfig>;

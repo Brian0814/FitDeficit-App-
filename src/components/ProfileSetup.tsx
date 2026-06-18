@@ -3,7 +3,7 @@ import { doc, setDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { UserProfile } from "../types";
 import { calculateMacros } from "../lib/calculators";
-import { Dumbbell, Save, Eye, EyeOff, Scale, User, Calendar, Activity, Sparkles, CheckCircle2 } from "lucide-react";
+import { Dumbbell, Save, Eye, EyeOff, Scale, User, Calendar, Activity, Sparkles, CheckCircle2, AlertTriangle } from "lucide-react";
 
 interface ProfileSetupProps {
   userId: string;
@@ -25,6 +25,29 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
   const [currentWeight, setCurrentWeight] = useState<number>(initialProfile?.currentWeight || 180);
   const [goalWeight, setGoalWeight] = useState<number>(initialProfile?.goalWeight || 165);
   const [fitnessGoal, setFitnessGoal] = useState<"lose" | "tone" | "maintain" | "gain" | "lose_tone">(initialProfile?.fitnessGoal || "lose");
+  
+  const [weeklyRateOfChange, setWeeklyRateOfChange] = useState<number>(() => {
+    if (initialProfile?.weeklyRateOfChange !== undefined) {
+      return initialProfile.weeklyRateOfChange;
+    }
+    const initialGoal = initialProfile?.fitnessGoal || "lose";
+    if (initialGoal === "lose") return 1.0;
+    if (initialGoal === "lose_tone") return 0.75;
+    if (initialGoal === "tone") return 0.5;
+    if (initialGoal === "gain") return 0.5;
+    return 0;
+  });
+
+  // Sync sensible rate default when goal changes if it's the first creation or they change goal
+  useEffect(() => {
+    if (!initialProfile) {
+      if (fitnessGoal === "lose") setWeeklyRateOfChange(1.0);
+      else if (fitnessGoal === "lose_tone") setWeeklyRateOfChange(0.75);
+      else if (fitnessGoal === "tone") setWeeklyRateOfChange(0.5);
+      else if (fitnessGoal === "gain") setWeeklyRateOfChange(0.5);
+      else setWeeklyRateOfChange(0);
+    }
+  }, [fitnessGoal]);
   const [activityLevel, setActivityLevel] = useState<"sedentary" | "light" | "moderate" | "active" | "very_active">(initialProfile?.activityLevel || "moderate");
   const [workoutExperience, setWorkoutExperience] = useState<"beginner" | "intermediate" | "advanced">(initialProfile?.workoutExperience || "beginner");
   const [dietaryPreference, setDietaryPreference] = useState<string>(initialProfile?.dietaryPreference || "None");
@@ -298,7 +321,8 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
       twoADaySplitPreference,
       dailySchedules,
       workoutStreak: initialProfile?.workoutStreak || 0,
-      createdAt: initialProfile?.createdAt || new Date().toISOString()
+      createdAt: initialProfile?.createdAt || new Date().toISOString(),
+      weeklyRateOfChange
     };
     try {
       const results = calculateMacros(tempProfile);
@@ -306,7 +330,7 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
     } catch (e) {
       // safe fallback
     }
-  }, [name, age, heightFeet, heightInches, currentWeight, goalWeight, fitnessGoal, activityLevel, workoutExperience, dietaryPreference, isPrivate, workoutSessionsPerDay, twoADaySplitPreference, dailySchedules]);
+  }, [name, age, heightFeet, heightInches, currentWeight, goalWeight, fitnessGoal, activityLevel, workoutExperience, dietaryPreference, isPrivate, workoutSessionsPerDay, twoADaySplitPreference, dailySchedules, weeklyRateOfChange]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -343,7 +367,8 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
       workoutTypesPref,
       primaryWorkoutStyle1,
       morningWorkoutStyle2,
-      eveningWorkoutStyle2
+      eveningWorkoutStyle2,
+      weeklyRateOfChange
     };
 
     try {
@@ -448,7 +473,8 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
                     workoutTypesPref,
                     primaryWorkoutStyle1,
                     morningWorkoutStyle2,
-                    eveningWorkoutStyle2
+                    eveningWorkoutStyle2,
+                    weeklyRateOfChange
                   };
                   localStorage.setItem("fitdeficit_offline_profile_" + userId, JSON.stringify(profileData));
                   onSave(profileData, "dashboard");
@@ -677,6 +703,84 @@ export default function ProfileSetup({ userId, userEmail, onSave, initialProfile
                     ))}
                   </div>
                 </div>
+
+                {fitnessGoal !== "maintain" && (
+                  <div className="mt-4 p-4 bg-neutral-950 border border-neutral-900 rounded-sm space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <label className="text-xs uppercase font-mono text-neutral-300">
+                        Target Weekly Rate of {fitnessGoal === "gain" ? "Weight Gain" : "Weight Loss"} (lbs/week)
+                      </label>
+                      <div className="text-[11px] font-mono text-yellow-400">
+                        {weeklyRateOfChange === 0 ? "No change" : `${weeklyRateOfChange} lbs / week (${fitnessGoal === "gain" ? "+" : "-"}${Math.round(weeklyRateOfChange * 500)} kcal/day)`}
+                      </div>
+                    </div>
+
+                    {/* Presets Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {(fitnessGoal === "gain" 
+                        ? [
+                            { val: 0.25, lbl: "Lean Mass", note: "0.25 lbs" },
+                            { val: 0.5, lbl: "Steady Build", note: "0.50 lbs" },
+                            { val: 1.0, lbl: "Aggressive Mass", note: "1.00 lbs" },
+                            { val: 1.5, lbl: "Heavy Bulk", note: "1.50 lbs" }
+                          ]
+                        : [
+                            { val: 0.5, lbl: "Moderate", note: "0.5 lbs" },
+                            { val: 1.0, lbl: "Standard", note: "1.0 lbs" },
+                            { val: 1.5, lbl: "Challenging", note: "1.5 lbs" },
+                            { val: 2.0, lbl: "Aggressive", note: "2.0 lbs" }
+                          ]
+                      ).map((preset) => (
+                        <button
+                          key={preset.val}
+                          type="button"
+                          onClick={() => setWeeklyRateOfChange(preset.val)}
+                          className={`p-2 border rounded-sm font-sans flex flex-col justify-center items-center text-center transition cursor-pointer select-none ${
+                            weeklyRateOfChange === preset.val
+                              ? "bg-yellow-400 border-yellow-400 text-black font-extrabold"
+                              : "bg-neutral-950 border-neutral-900 hover:border-neutral-700 text-neutral-300"
+                          }`}
+                          id={`btn-setup-rate-${preset.val}`}
+                        >
+                          <span className="text-[10px] uppercase font-semibold leading-tight">{preset.lbl}</span>
+                          <span className={`text-[9px] mt-0.5 leading-none ${weeklyRateOfChange === preset.val ? "text-neutral-900 font-bold" : "text-neutral-500"}`}>{preset.note}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Custom Value & Slider */}
+                    <div className="space-y-2 pt-1 border-t border-neutral-800/50">
+                      <div className="flex justify-between items-center text-[10px] text-neutral-400 font-mono">
+                        <span>OR SLIDE TO DEFINE CUSTOM RATE:</span>
+                        <span className="text-white bg-neutral-900 px-1.5 py-0.5 rounded border border-neutral-800">{weeklyRateOfChange} LBS / WK</span>
+                      </div>
+                      
+                      <div className="flex gap-4 items-center">
+                        <input
+                          type="range"
+                          min="0.1"
+                          max="4.0"
+                          step="0.05"
+                          value={weeklyRateOfChange}
+                          onChange={(e) => setWeeklyRateOfChange(parseFloat(e.target.value) || 0.5)}
+                          className="flex-1 h-1 bg-neutral-800 rounded appearance-none cursor-pointer accent-yellow-400 focus:outline-none"
+                          id="input-setup-rate-slider"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Safety Alert Warning Popup Message */}
+                    {weeklyRateOfChange > 2.0 && (
+                      <div className="p-3 bg-red-950/30 border border-red-900/50 text-red-300 text-[11px] rounded-sm font-sans flex items-start gap-2.5 leading-relaxed">
+                        <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5 animate-pulse" />
+                        <div>
+                          <strong className="text-red-400 block uppercase font-mono tracking-wider mb-0.5">⚠️ UNSAFE DANGEROUS TARGET RATE WARNING</strong>
+                          Choosing to {fitnessGoal === "gain" ? "gain" : "lose"} weight at a speed of <strong>{weeklyRateOfChange} lbs per week</strong> is highly aggressive. It translates to extreme daily metabolic shifts of <strong>{Math.round(weeklyRateOfChange * 500)} excess/deficit calories</strong> which is clinically classified as unsafe/unsustainable for most athletes or active individuals. This can induce muscle catabolism, severe fatigue, metabolic slowing, or subsequent rapid visual rebound. We recommend target rates under 2.0 lbs/week.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Schedules & Intensity */}
