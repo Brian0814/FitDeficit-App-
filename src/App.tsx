@@ -585,6 +585,24 @@ export default function App() {
     );
   }
 
+  // Calculate current week of program based on profile creation date
+  const getCurrentProgramWeek = () => {
+    if (!profile || !profile.createdAt) return 1;
+    try {
+      const createdTime = new Date(profile.createdAt).getTime();
+      const currentTime = new Date().getTime();
+      if (isNaN(createdTime)) return 1;
+      
+      const diffTime = currentTime - createdTime;
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      // Days 0-6 are Week 1, 7-13 are Week 2, etc.
+      const currentWeek = Math.floor(diffDays / 7) + 1;
+      return Math.max(1, currentWeek);
+    } catch (e) {
+      return 1;
+    }
+  };
+
   // Make sure profile calculations align properly
   const macros: CalorieCalculations = profile 
     ? calculateMacros(profile) 
@@ -822,8 +840,11 @@ export default function App() {
                     <h2 className="text-3xl font-black italic uppercase leading-none text-white">Dashboard Overview</h2>
                     <p className="text-zinc-550 font-bold uppercase tracking-widest text-xs">Biometric System Feedback</p>
                   </div>
-                  <div className="flex gap-2">
-                    <div className="px-4 py-2 border border-zinc-700 text-xs font-bold font-mono">WEEK {macros.timelineWeeks || 12}</div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <div className="px-4 py-2 border border-zinc-700 text-xs font-bold font-mono uppercase">WEEK {getCurrentProgramWeek()}</div>
+                    <div className="px-4 py-2 border border-zinc-800 text-zinc-400 text-xs font-bold font-mono uppercase">
+                      EST: {macros.timelineWeeks || 12} WEEKS
+                    </div>
                     <div className="px-4 py-2 bg-yellow-400 text-black text-xs font-black uppercase">{profile?.goalWeight} LBS GOAL</div>
                   </div>
                 </div>
